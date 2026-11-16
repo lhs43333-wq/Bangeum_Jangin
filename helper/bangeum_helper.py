@@ -27,7 +27,7 @@ NUM = r"-?\d{1,5}(\.\d{1,3})?"
 ALLOWED = [
     re.compile(r"^#[^\r\n]{0,200}$"),
     re.compile(r"^Preamp: %s dB$" % NUM),
-    re.compile(r"^Channel: (L|R|ALL)$"),
+    re.compile(r"^Channel: (L|R|C|LFE|RL|RR|SL|SR|ALL)$"),
     re.compile(r"^Filter \d{1,2}: ON PK Fc %s Hz Gain %s dB Q %s$" % (NUM, NUM, NUM)),
 ]
 MAX_LINES = 80
