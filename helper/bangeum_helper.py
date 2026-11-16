@@ -29,6 +29,8 @@ ALLOWED = [
     re.compile(r"^Preamp: %s dB$" % NUM),
     re.compile(r"^Channel: (L|R|C|LFE|RL|RR|SL|SR|ALL)$"),
     re.compile(r"^Filter \d{1,2}: ON PK Fc %s Hz Gain %s dB Q %s$" % (NUM, NUM, NUM)),
+    re.compile(r"^Filter \d{1,2}: ON (LP|HP) Fc %s Hz$" % NUM),
+    re.compile(r"^Copy: LFE=\d\.\d{3}\*L\+\d\.\d{3}\*R\+LFE$"),
 ]
 MAX_LINES = 80
 STATIC = {
