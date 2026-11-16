@@ -298,7 +298,7 @@ const DSP = (() => {
     }
     filters = filters.filter(p => Math.abs(p.gain) >= 0.5 && !(p.gain > 0 && p.q > o.maxBoostQ)).sort((a, b) => a.fc - b.fc);
     /* 증폭 필터가 겹쳐도 합계가 maxBoost를 넘지 않게 줄인다 (전체 음량이 과하게 낮아지는 것을 막는다) */
-    const wide = logGrid(20, 20000, 24);
+    const wide = logGrid(20, 20000, 96);
     for (let k = 0; k < 6; k++) {
       let peak = 0; for (const v of eqDb(wide, fs, filters)) if (v > peak) peak = v;
       if (peak <= o.maxBoost + 0.05) break;
@@ -318,15 +318,19 @@ const DSP = (() => {
     const e = eqDb(logGrid(20, 20000, 96), fs, filters); let m = -Infinity; for (const v of e) if (v > m) m = v;
     return m > 0 ? -(m + headroom) : 0;
   }
-  /* xo = { fc, g } 를 주면 크로스오버를 넣는다: 좌우의 저음을 서브우퍼(LFE)로 보내고, 좌우에서는 저음을 뺀다 (24 dB/옥타브) */
   function formatConfig(channels, preamp, xo) {
     const lines = ['# Bangeum Jangin EQ', 'Preamp: ' + preamp.toFixed(1) + ' dB'];
-    if (xo) lines.push('Copy: LFE=' + xo.g.toFixed(3) + '*L+' + xo.g.toFixed(3) + '*R+LFE');
-    for (const ch of Object.keys(channels)) {
-      lines.push('Channel: ' + ch); let n = 0; const add = t => lines.push('Filter ' + (++n) + ': ON ' + t);
-      if (xo && (ch === 'L' || ch === 'R' || ch === 'LFE')) { const t = (ch === 'LFE' ? 'LP' : 'HP') + ' Fc ' + xo.fc.toFixed(1) + ' Hz'; add(t); add(t); }
-      channels[ch].forEach(p => add('PK Fc ' + p.fc.toFixed(1) + ' Hz Gain ' + p.gain.toFixed(1) + ' dB Q ' + p.q.toFixed(2)));
-    }
+    const pk = (list, n0) => list.forEach((p, i) => lines.push('Filter ' + (n0 + i + 1) + ': ON PK Fc ' + p.fc.toFixed(1) + ' Hz Gain ' + p.gain.toFixed(1) + ' dB Q ' + p.q.toFixed(2)));
+    if (!xo) { for (const ch of Object.keys(channels)) { lines.push('Channel: ' + ch); pk(channels[ch], 0); } return lines.join('\n') + '\n'; }
+    /* 크로스오버: 좌우를 임시 채널(XOVERL/XOVERR)로 옮겨 저음을 빼고, 좌우의 합을 서브우퍼(LFE)로 보내 저음만 남긴다.
+       필터를 두 번씩 걸어 24 dB/옥타브로 나눈다. 마지막에 임시 채널을 좌우로 되돌린다. */
+    const g = xo.g.toFixed(3), cut = t => { const l = 'ON ' + t + ' Fc ' + xo.fc.toFixed(1) + ' Hz Q 0.707'; lines.push('Filter 1: ' + l, 'Filter 2: ' + l); };
+    lines.push('Copy: LFE=' + g + '*L+' + g + '*R' + (xo.lfe ? '+LFE' : '') + ' XOVERL=L XOVERR=R');      /* +LFE: 5.1 영상의 서브우퍼 전용 소리도 합친다 */
+    lines.push('Channel: XOVERL XOVERR'); if (xo.delay < 0) lines.push('Delay: ' + (-xo.delay).toFixed(2) + ' ms'); cut('HPQ');
+    lines.push('Channel: LFE'); if (xo.delay > 0) lines.push('Delay: ' + xo.delay.toFixed(2) + ' ms'); cut('LPQ'); pk(channels.LFE || [], 2);
+    lines.push('Channel: XOVERL'); pk(channels.L || [], 0);
+    lines.push('Channel: XOVERR'); pk(channels.R || [], 0);
+    lines.push('Copy: L=XOVERL R=XOVERR');
     return lines.join('\n') + '\n';
   }
   /* 마이크 보정 파일(주파수, dB 두 열) */
@@ -361,6 +365,53 @@ const DSP = (() => {
     if (cal) resp = applyCalibration(grid, resp, cal);
     return { grid, resp };
   }
+  /* ----- 서브우퍼 타이밍: 한 번의 녹음에 L, SUB, R 측정음을 일정 간격으로 넣어 서로의 도착 시간 차이를 구한다 ----- */
+  function coeffH(k, f, fs) {                    /* 바이쿼드의 복소 응답 [re, im] */
+    const w = 2 * Math.PI * f / fs, c1 = Math.cos(w), s1 = -Math.sin(w), c2 = Math.cos(2 * w), s2 = -Math.sin(2 * w);
+    const nr = k[0] + k[1] * c1 + k[2] * c2, ni = k[1] * s1 + k[2] * s2, dr = 1 + k[3] * c1 + k[4] * c2, di = k[3] * s1 + k[4] * s2, d = dr * dr + di * di;
+    return [(nr * dr + ni * di) / d, (ni * dr - nr * di) / d];
+  }
+  function windowSpectrum(ir, fs, start, len, nfft) {
+    const re = new Float64Array(nfft), im = new Float64Array(nfft), N = ir.length, fin = Math.floor(0.005 * fs), tail = len >> 2;
+    for (let i = 0; i < len; i++) re[i] = ir[(((start + i) % N) + N) % N];
+    for (let i = 0; i < fin; i++) re[i] *= 0.5 * (1 - Math.cos(Math.PI * i / fin));
+    for (let i = 0; i < tail; i++) re[len - tail + i] *= 0.5 * (1 + Math.cos(Math.PI * i / tail));
+    fft(re, im); return { re, im };
+  }
+  function timingSpectra(rec, ref, fs, gapSec) {
+    const ir = impulseResponse(rec, ref), N = ir.length, gap = Math.round(gapSec * fs), near = Math.round(0.02 * fs);
+    let p = 0, pv = 0; for (let i = 0; i < N; i++) { const a = Math.abs(ir[i]); if (a > pv) { pv = a; p = i; } }
+    /* 가장 큰 피크가 L, SUB, R 중 무엇인지 모르므로 세 가지 가정을 모두 시험해 에너지가 가장 큰 쪽을 고른다 */
+    let best = -1, t0 = p;
+    for (let k = 0; k < 3; k++) {
+      const c = p - k * gap; let e = 0;
+      for (let m = 0; m < 3; m++) for (let i = -near; i <= near; i++) { const v = ir[(((c + m * gap + i) % N) + N) % N]; e += v * v; }
+      if (e > best) { best = e; t0 = c; }
+    }
+    const pre = Math.round(0.03 * fs), len = Math.round(0.35 * fs), nfft = 32768;
+    return { df: fs / nfft, fs, L: windowSpectrum(ir, fs, t0 - pre, len, nfft), SUB: windowSpectrum(ir, fs, t0 + gap - pre, len, nfft), R: windowSpectrum(ir, fs, t0 + 2 * gap - pre, len, nfft) };
+  }
+  /* 크로스오버 부근에서 스피커와 서브우퍼의 합이 가장 커지는 지연(ms)을 찾는다. 양수 = 서브우퍼를 늦춤, 음수 = 좌우 스피커를 늦춤 */
+  function alignSub(t, xo, filt) {
+    const fs = t.fs, mul = (a, b) => [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]];
+    const hp = highpassCoeffs(fs, xo.fc), lp = lowpassCoeffs(fs, xo.fc), bins = [];
+    for (let b = Math.ceil(xo.fc / 1.6 / t.df); b <= Math.floor(xo.fc * 1.6 / t.df); b++) {
+      const f = b * t.df, chain = (H, list, x) => { let h = mul(H, mul(x, x)); for (const p of list) h = mul(h, coeffH(peakCoeffs(fs, p.fc, p.gain, p.q), f, fs)); return h; };
+      const sub = chain([t.SUB.re[b] * xo.g, t.SUB.im[b] * xo.g], filt.SUB || [], coeffH(lp, f, fs));
+      bins.push({ f, L: chain([t.L.re[b], t.L.im[b]], filt.L || [], coeffH(hp, f, fs)), R: chain([t.R.re[b], t.R.im[b]], filt.R || [], coeffH(hp, f, fs)), sub });
+    }
+    let bestD = 0, bestS = -Infinity;
+    for (let d = -20; d <= 30.0001; d += 0.1) {
+      let sc = 0;
+      for (const x of bins) {
+        const w = -2 * Math.PI * x.f * d / 1000, sr = x.sub[0] * Math.cos(w) - x.sub[1] * Math.sin(w), si = x.sub[0] * Math.sin(w) + x.sub[1] * Math.cos(w);
+        sc += 10 * Math.log10((x.L[0] + sr) ** 2 + (x.L[1] + si) ** 2 + 1e-20) + 10 * Math.log10((x.R[0] + sr) ** 2 + (x.R[1] + si) ** 2 + 1e-20);
+      }
+      sc = sc / (2 * bins.length) - 0.02 * Math.abs(d);      /* 비슷하면 지연이 작은 쪽 */
+      if (sc > bestS) { bestS = sc; bestD = d; }
+    }
+    return Math.round(bestD * 10) / 10;
+  }
   /* 체험용 가상의 방 */
   function simulateRoom(x, fs, modes, seed = 1) {
     let y = biquad(x, highpassCoeffs(fs, 38));
@@ -373,7 +424,7 @@ const DSP = (() => {
     return out;
   }
   return { logSweep, fft, impulseResponse, frequencyResponse, logGrid, smoothToGrid, peakCoeffs, lowpassCoeffs, highpassCoeffs, eqDb, biquad, bandMean,
-    targetCurve, design, preampDb, formatConfig, parseCalibration, applyCalibration, responseFromRecording, simulateRoom };
+    targetCurve, design, preampDb, formatConfig, timingSpectra, alignSub, parseCalibration, applyCalibration, responseFromRecording, simulateRoom };
 })();
 if (typeof module !== 'undefined') module.exports = DSP;
 </script>
@@ -408,6 +459,8 @@ const TEXT = {
     pv_bad: '이 파일은 재생할 수 없습니다. mp3, wav, flac 같은 음악 파일을 골라 주세요.',
     vf_go: '보정 후 다시 측정해 확인', vf_note: '보정을 건 측정음을 재생해 실제 결과를 그래프에 겹쳐 보여 줍니다.', lg_meas: '보정 후(실측)',
     xo_h: '서브우퍼 연결 (크로스오버)', xo_on: '음악의 저음을 서브우퍼로 보내기', xo_on_d: '좌우 스피커의 저음을 서브우퍼가 대신 내게 합니다. 일반 음악과 영상에서도 서브우퍼가 울립니다.',
+    xo_delay: '서브우퍼 지연 (ms). 음수는 좌우 스피커를 늦춘다는 뜻입니다.', xo_auto: '측정으로 구한 값: {v} ms', xo_noauto: '타이밍을 측정하지 못해 0으로 두었습니다. 값을 알면 직접 넣어 주세요.',
+    xo_lfe: '5.1 영화·게임의 서브우퍼 전용 소리도 포함', xo_lfe_d: '영상에 들어 있는 서브우퍼 채널 소리를 함께 재생합니다.', s4_TIME: '서브우퍼 타이밍 측정 중…',
     xo_fc: '나누는 주파수 (이보다 낮은 음은 서브우퍼가 냅니다)', xo_trim: '서브우퍼 음량 조절: {v} dB',
     xo_note: '서브우퍼 음량은 측정값으로 좌우 스피커에 맞췄습니다. 들어 보고 많거나 적으면 위 막대로 조절하세요.',
     xo_short: '서브우퍼 소리가 약 {v} dB 부족합니다. 서브우퍼 본체의 음량을 올린 뒤 다시 측정하면 더 잘 맞습니다.',
@@ -482,6 +535,8 @@ const TEXT = {
     pv_bad: 'This file cannot be played. Choose a music file such as mp3, wav or flac.',
     vf_go: 'Measure again with correction', vf_note: 'Plays the measurement tone with the correction applied and overlays the real result on the graph.', lg_meas: 'After (measured)',
     xo_h: 'Subwoofer link (crossover)', xo_on: 'Send bass from music to the subwoofer', xo_on_d: 'The subwoofer plays the bass instead of the left and right speakers, so it also works with ordinary music and video.',
+    xo_delay: 'Subwoofer delay (ms). A negative value delays the left and right speakers instead.', xo_auto: 'Measured value: {v} ms', xo_noauto: 'Timing could not be measured, so this is set to 0. Enter a value if you know it.',
+    xo_lfe: 'Include the subwoofer channel of 5.1 movies and games', xo_lfe_d: 'Also plays the dedicated subwoofer channel that video content carries.', s4_TIME: 'Measuring subwoofer timing…',
     xo_fc: 'Crossover frequency (the subwoofer plays everything below this)', xo_trim: 'Subwoofer level trim: {v} dB',
     xo_note: 'The subwoofer level was matched to the left and right speakers from the measurement. Use the slider above if it sounds too strong or too weak.',
     xo_short: 'The subwoofer is about {v} dB too quiet. Turn up the volume on the subwoofer itself and measure again for a better match.',
@@ -537,7 +592,7 @@ const S = {
   mic: 'gen', cal: null, calMsg: '', procWarn: '', permError: false,
   testing: false, level: -90, measuring: '', measureMsg: '', measureWarn: '',
   source: 'pc', phone: { peer: null, conn: null, code: '', url: '', qr: '', status: '', fs: 0, proc: '', err: '', wait: null },
-  xo: { on: true, fc: 80, trim: 0 },
+  xo: { on: true, fc: 80, trim: 0, delay: 0, auto: true, lfe: true },
   outCh: 2, subAvail: false, useSub: false, boost: false, pvMode: 'after', pvPlaying: false, pvBuf: null, pvMsg: '',
   result: null, taste: 'flat', view: 'L', helper: null, applyMsg: '', applyState: '',
 };
@@ -660,6 +715,9 @@ function xoView() {
   if (!S.xo.on) return h;
   h += '<label class="field">' + t('xo_fc') + '<select id="xoFc">' + [60, 80, 100, 120].map(f => '<option value="' + f + '"' + (f === S.xo.fc ? ' selected' : '') + '>' + f + ' Hz</option>').join('') + '</select></label>';
   h += '<label class="field">' + t('xo_trim', { v: (S.xo.trim > 0 ? '+' : '') + S.xo.trim }) + '<input type="range" id="xoTrim" min="-10" max="10" step="1" value="' + S.xo.trim + '" style="display:block;width:100%;margin-top:6px"></label>';
+  h += '<label class="field">' + t('xo_delay') + '<input type="number" id="xoDelay" min="-50" max="100" step="0.1" value="' + S.xo.delay + '" style="display:block;width:100%;margin-top:4px;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px"></label>';
+  h += '<p class="meterlabel" style="margin:-6px 0 12px">' + (r.autoDelay === null ? t('xo_noauto') : t('xo_auto', { v: r.autoDelay.toFixed(1) })) + '</p>';
+  h += '<label class="choice' + (S.xo.lfe ? ' on' : '') + '" style="margin-bottom:12px"><input type="checkbox" id="xoLfe"' + (S.xo.lfe ? ' checked' : '') + '><b>' + t('xo_lfe') + '</b><span>' + t('xo_lfe_d') + '</span></label>';
   h += '<p class="note">' + t('xo_note') + '</p>';
   if (r.xo && r.xo.short > 0.5) h += '<p class="note warn">' + t('xo_short', { v: r.xo.short.toFixed(0) }) + '</p>';
   return h;
@@ -798,7 +856,7 @@ function playSweep(signals, lead = 0.4, tail = 1.2) {      /* signals: [[채널 
     for (const [i, x] of signals) { const d = buf.getChannelData(i); for (let k = 0; k < x.length; k++) d[k] += x[k]; }
     const src = S.ctx.createBufferSource(); src.buffer = buf; src.connect(S.ctx.destination);
     src.start(S.ctx.currentTime + lead);
-    const total = (lead + SWEEP.dur + tail) * 1000, t0 = performance.now();
+    const total = (lead + signals[0][1].length / S.ctx.sampleRate + tail) * 1000, t0 = performance.now();
     const tick = setInterval(() => { const bar = $('bar'); if (bar) bar.style.width = Math.min(100, (performance.now() - t0) / total * 100) + '%'; }, 100);
     setTimeout(() => { clearInterval(tick); resolve(); }, total);
   });
@@ -854,7 +912,9 @@ async function measure(verify) {
       const twice = (x, k) => DSP.biquad(DSP.biquad(x, k), k);
       if (xo && ch !== 'SUB') {                    /* 좌우 스피커 + 서브우퍼가 함께 내는 실제 소리를 측정 */
         out = eq(twice(sweepOut, DSP.highpassCoeffs(fsOut, xo.fc)), ch);
-        signals = [[CH_INDEX[ch], out], [CH_INDEX.SUB, eq(twice(sweepOut.map(v => v * xo.g), DSP.lowpassCoeffs(fsOut, xo.fc)), 'SUB')]];
+        const sub = eq(twice(sweepOut.map(v => v * xo.g), DSP.lowpassCoeffs(fsOut, xo.fc)), 'SUB'), nd = Math.round(Math.abs(xo.delay || 0) * fsOut / 1000);
+        const late = x => { const y = new Float64Array(x.length); y.set(x.subarray(0, x.length - nd), nd); return y; };
+        signals = xo.delay >= 0 ? [[CH_INDEX[ch], out], [CH_INDEX.SUB, late(sub)]] : [[CH_INDEX[ch], late(out)], [CH_INDEX.SUB, sub]];
       } else { out = eq(xo && ch === 'SUB' ? twice(sweepOut, DSP.lowpassCoeffs(fsOut, xo.fc)) : sweepOut, ch); signals = [[CH_INDEX[ch], out]]; }
     }
     if (S.demo) { await pause(500); rec = DSP.simulateRoom(out, fs, DEMO_ROOMS[ch], i + 3); }
@@ -868,9 +928,20 @@ async function measure(verify) {
     S.measuring = 'calc'; render(); await pause(30);
     raw[ch] = DSP.responseFromRecording(rec, sweep, fs, !S.demo && !phone && S.mic === 'cal' ? S.cal : null);
   }
+  let timing = null;
+  if (!verify && !S.demo && order.includes('SUB')) {          /* L, SUB, R 짧은 측정음을 3초 간격으로 한 번에 재생해 도착 시간 차이를 잰다 */
+    S.measuring = 'TIME'; render();
+    try {
+      const GAP = 3, f2t = Math.min(2000, f2), short = DSP.logSweep(20, f2t, 2, fsOut), ref = fs === fsOut ? short : DSP.logSweep(20, f2t, 2, fs);
+      const place = k => { const x = new Float64Array(Math.round((2 * GAP + 2) * fsOut)); x.set(short, Math.round(k * GAP * fsOut)); return x; };
+      const sig = [[CH_INDEX.L, place(0)], [CH_INDEX.SUB, place(1)], [CH_INDEX.R, place(2)]];
+      const rec = phone ? await capturePhone(sig) : await captureLocal(sig);
+      timing = DSP.timingSpectra(rec, ref, fs, GAP);
+    } catch (err) { timing = null; }
+  }
   S.measuring = '';
   if (verify) for (const ch of order) S.result[ch].verified = raw[ch].resp;
-  else { S.result = { fs, raw, order }; S.view = 'L'; computeCorrection(); }
+  else { S.result = { fs, raw, order, timing, autoDelay: null }; S.view = 'L'; S.xo.auto = true; computeCorrection(); }
   go(5);
 }
 function computeCorrection() {
@@ -886,11 +957,13 @@ function computeCorrection() {
   }
   r.xo = null;
   if (S.xo.on && r.order.includes('SUB')) {
-    /* 같은 저음이 좌우 두 스피커에서 날 때의 크기(+6 dB)와 서브우퍼가 낼 크기를 맞춘다. 디지털 한계 때문에 -6 dB(0.5배)까지만 올린다 */
-    const want = (r.L.level + r.R.level) / 2 - r.SUB.level + S.xo.trim, gdb = Math.max(-30, Math.min(-6, want));
-    r.xo = { fc: S.xo.fc, g: Math.pow(10, gdb / 20), gdb, short: Math.max(0, want - gdb) };
+    /* 같은 저음이 좌우 두 스피커에서 날 때의 크기(+6 dB)와 서브우퍼가 낼 크기를 맞춘다. 1배(0 dB)까지만 올린다 */
+    const want = (r.L.level + r.R.level) / 2 - r.SUB.level + S.xo.trim, gdb = Math.max(-30, Math.min(0, want));
+    r.xo = { fc: S.xo.fc, g: Math.pow(10, gdb / 20), gdb, short: Math.max(0, want - gdb), delay: S.xo.delay, lfe: S.xo.lfe };
+    r.autoDelay = r.timing ? DSP.alignSub(r.timing, r.xo, { L: r.L.filters, R: r.R.filters, SUB: r.SUB.filters }) : null;
+    if (S.xo.auto) { S.xo.delay = r.autoDelay === null ? 0 : r.autoDelay; r.xo.delay = S.xo.delay; }
   }
-  r.preamp = pre; r.config = DSP.formatConfig(chans, r.preamp, r.xo);
+  r.preamp = pre; r.config = DSP.formatConfig(chans, r.preamp, r.xo);       /* 주의: chans의 키는 Equalizer APO 채널 이름(L, R, LFE) */
 }
 
 /* ----- 보정된 소리 들어 보기 ----- */
@@ -924,12 +997,12 @@ async function startPreview() {
   };
   const out = (node, i, bank) => { const g = c.createGain(); node.connect(g); g.connect(merge, 0, i); bank.push(g); };
   let subIn = null;
-  if (xo && CH_INDEX.SUB < n) { subIn = c.createGain(); subIn.gain.value = xo.g; const l1 = cross('lowpass', xo.fc), l2 = cross('lowpass', xo.fc); subIn.connect(l1); l1.connect(l2); out(chain('SUB', l2), CH_INDEX.SUB, pv.wet); }
+  if (xo && CH_INDEX.SUB < n) { subIn = c.createGain(); subIn.gain.value = xo.g; const l1 = cross('lowpass', xo.fc), l2 = cross('lowpass', xo.fc); const dl = c.createDelay(0.2); dl.delayTime.value = Math.min(0.2, Math.max(0, xo.delay || 0) / 1000); subIn.connect(l1); l1.connect(l2); l2.connect(dl); out(chain('SUB', dl), CH_INDEX.SUB, pv.wet); }
   for (const ch of r.order) {
     const i = CH_INDEX[ch]; if (i >= buf.numberOfChannels || i >= n) continue;
     if (ch === 'SUB' && xo) continue;                       /* 크로스오버를 쓰면 서브우퍼는 좌우에서 온 저음만 낸다 */
     const head = c.createGain(); split.connect(head, i); out(head, i, pv.dry);
-    if (xo && ch !== 'SUB') { const h1 = cross('highpass', xo.fc), h2 = cross('highpass', xo.fc); head.connect(h1); h1.connect(h2); out(chain(ch, h2), i, pv.wet); if (subIn) head.connect(subIn); }
+    if (xo && ch !== 'SUB') { const h1 = cross('highpass', xo.fc), h2 = cross('highpass', xo.fc); const md = c.createDelay(0.2); md.delayTime.value = Math.min(0.2, Math.max(0, -(xo.delay || 0)) / 1000); head.connect(h1); h1.connect(h2); h2.connect(md); out(chain(ch, md), i, pv.wet); if (subIn) head.connect(subIn); }
     else out(chain(ch, head), i, pv.wet);
   }
   master.gain.setValueAtTime(0.0001, c.currentTime); master.gain.exponentialRampToValueAtTime(1, c.currentTime + 1);
@@ -1017,8 +1090,10 @@ $('view').addEventListener('change', async e => {
     if (el.name === 'taste') S.taste = el.value; else S.boost = el.value === 'fill';
     const playing = S.pvPlaying; computeCorrection(); if (playing) await startPreview(); render();
   }
-  else if (el.id === 'xoOn' || el.id === 'xoFc' || el.id === 'xoTrim') {
-    if (el.id === 'xoOn') S.xo.on = el.checked; else if (el.id === 'xoFc') S.xo.fc = Number(el.value); else S.xo.trim = Number(el.value);
+  else if (el.id === 'xoOn' || el.id === 'xoFc' || el.id === 'xoTrim' || el.id === 'xoDelay' || el.id === 'xoLfe') {
+    if (el.id === 'xoLfe') S.xo.lfe = el.checked;
+    if (el.id === 'xoOn') S.xo.on = el.checked; else if (el.id === 'xoFc') S.xo.fc = Number(el.value); else if (el.id === 'xoTrim') S.xo.trim = Number(el.value);
+    else if (el.id === 'xoDelay') { S.xo.delay = Math.min(100, Math.max(-50, Number(el.value) || 0)); S.xo.auto = false; }
     const playing = S.pvPlaying; computeCorrection(); if (playing) await startPreview(); render();
   }
   else if (el.id === 'useSub') { S.useSub = el.checked; setupOutput(); render(); }
