@@ -219,8 +219,8 @@ const DSP = (() => {
     return f3;
   }
   /* 목표 곡선: 중음역 평균 레벨 + 기울기(취향) + 스피커 저음 한계 따라가기 */
-  function targetCurve(grid, meas, tilt = 0) {
-    const level = bandMean(grid, meas, 200, 2000), f3 = rolloffHz(grid, meas, level), t = new Float64Array(grid.length);
+  function targetCurve(grid, meas, tilt = 0, o = {}) {
+    const level = bandMean(grid, meas, o.refLo || 200, o.refHi || 2000), f3 = rolloffHz(grid, meas, level, 3, o.searchHi || 200), t = new Float64Array(grid.length);
     for (let i = 0; i < grid.length; i++) t[i] = level + tilt * Math.log2(grid[i] / 1000) - 10 * Math.log10(1 + Math.pow(f3 / grid[i], 4));
     return { target: t, level, rolloff: f3 };
   }
@@ -275,7 +275,7 @@ const DSP = (() => {
   }
   /* 측정 응답을 목표에 가깝게 만드는 피킹 필터 묶음 찾기 */
   function design(grid, meas, target, fs, opts = {}) {
-    const o = Object.assign({ fLo: 40, fHi: 16000, maxFilters: 8, maxBoost: 6, maxCut: -12, stopDb: 1, boostWeight: 0.6, maxBoostQ: 5 }, opts);
+    const o = Object.assign({ fLo: 40, fHi: 16000, maxFilters: 8, maxBoost: 0, maxCut: -12, stopDb: 1, boostWeight: 0.6, maxBoostQ: 5 }, opts);
     const g = [], base = [];
     for (let i = 0; i < grid.length; i++) if (grid[i] >= o.fLo && grid[i] <= o.fHi) { g.push(grid[i]); base.push(meas[i] - target[i]); }
     const unpack = x => { const f = []; for (let i = 0; i < x.length; i += 3) f.push({ fc: Math.exp(x[i]), gain: x[i + 1], q: Math.exp(x[i + 2]) }); return f; };
@@ -284,16 +284,26 @@ const DSP = (() => {
     let filters = [];
     for (let k = 0; k < o.maxFilters; k++) {
       const err = errOf(filters); let idx = 0, best = 0;
-      for (let i = 0; i < err.length; i++) { const s = Math.abs(err[i]) * (err[i] < 0 ? o.boostWeight : 1); if (s > best) { best = s; idx = i; } }
+      /* 증폭을 허용하지 않으면(maxBoost 0) 꺼진 곳은 건드리지 않는다 */
+      for (let i = 0; i < err.length; i++) { const s = Math.abs(err[i]) * (err[i] < 0 ? (o.maxBoost > 0 ? o.boostWeight : 0) : 1); if (s > best) { best = s; idx = i; } }
       if (best < o.stopDb) break;
       filters.push({ fc: g[idx], gain: Math.min(o.maxBoost, Math.max(o.maxCut, -err[idx])), q: estimateQ(g, err, idx) });
       const x0 = [], lb = [], ub = [];
       for (const p of filters) { x0.push(Math.log(p.fc), p.gain, Math.log(p.q)); lb.push(Math.log(o.fLo), o.maxCut, Math.log(0.5)); ub.push(Math.log(o.fHi), o.maxBoost, Math.log(10)); }
       filters = unpack(leastSquares(res, x0, lb, ub));
     }
-    return filters.filter(p => Math.abs(p.gain) >= 0.5 && !(p.gain > 0 && p.q > o.maxBoostQ)).sort((a, b) => a.fc - b.fc);
+    filters = filters.filter(p => Math.abs(p.gain) >= 0.5 && !(p.gain > 0 && p.q > o.maxBoostQ)).sort((a, b) => a.fc - b.fc);
+    /* 증폭 필터가 겹쳐도 합계가 maxBoost를 넘지 않게 줄인다 (전체 음량이 과하게 낮아지는 것을 막는다) */
+    const wide = logGrid(20, 20000, 24);
+    for (let k = 0; k < 6; k++) {
+      let peak = 0; for (const v of eqDb(wide, fs, filters)) if (v > peak) peak = v;
+      if (peak <= o.maxBoost + 0.05) break;
+      for (const p of filters) if (p.gain > 0) p.gain *= Math.max(0, o.maxBoost) / peak;
+    }
+    return filters.filter(p => Math.abs(p.gain) >= 0.5);
   }
-  function preampDb(fs, filters, headroom = 0.5) {
+  /* 증폭한 만큼만 전체 음량을 낮춘다(클리핑 방지). 증폭이 없으면 0 dB */
+  function preampDb(fs, filters, headroom = 0) {
     if (!filters.length) return 0;
     const e = eqDb(logGrid(20, 20000, 96), fs, filters); let m = -Infinity; for (const v of e) if (v > m) m = v;
     return m > 0 ? -(m + headroom) : 0;
@@ -374,6 +384,16 @@ const TEXT = {
     ph_limit: '폰 마이크는 일반 마이크로 취급해 300 Hz 이하만 보정합니다.', ph_err: '폰 연결 서비스를 사용할 수 없습니다 ({e}). 잠시 뒤 다시 시도해 주세요.',
     s3_p_phone: '폰을 평소 듣는 자리의 귀 높이에 두세요. 폰 아래쪽(마이크가 있는 쪽)이 스피커를 향하게 하고, 손에 들지 말고 받침이나 쿠션 위에 올려 두세요.',
     s4_phone_fail: '폰에서 녹음을 받지 못했습니다. 폰 화면이 켜져 있는지, 연결됐는지 확인하고 다시 측정해 주세요.',
+    s1_sub: '서브우퍼 채널도 따로 측정하기', s1_sub_d: '이 출력 장치는 5.1 채널입니다. 서브우퍼가 별도 채널(LFE)에 연결돼 있으면 켜 주세요.',
+    s1_nosub: '이 출력 장치는 2채널로 잡혀 있어 서브우퍼 채널을 따로 측정할 수 없습니다. Windows 소리 설정에서 스피커 구성을 5.1로 바꾼 뒤 이 페이지를 새로 고쳐 주세요.',
+    s4_SUB: '서브우퍼 측정 중…', s5_sub: '서브우퍼', s4_prev: '예전에 적용한 보정이 있다면 끄고 측정해야 합니다. 도우미가 켜져 있으면 자동으로 끕니다.',
+    s5_strength: '보정 방식', st_keep: '음량 유지 (권장)', st_keep_d: '부풀어 오른 음역만 줄입니다. 전체 음량은 그대로입니다.',
+    st_fill: '꺼진 음역도 올리기', st_fill_d: '꺼진 곳을 최대 4 dB 올립니다. 그만큼 전체 음량이 낮아집니다.',
+    s5_vol: '전체 음량 변화: {v} dB', s5_listen: '보정된 소리 들어 보기',
+    pv_play: '재생', pv_stop: '정지', pv_before: '보정 전', pv_after: '보정 후', pv_file: '내 음악 파일로 듣기 (선택)',
+    pv_note: '시험음이나 고른 음악을 이 브라우저에서 보정 전후로 바꿔 가며 들을 수 있습니다. PC에 보정을 이미 적용했다면 먼저 꺼야 정확합니다.',
+    pv_bad: '이 파일은 재생할 수 없습니다. mp3, wav, flac 같은 음악 파일을 골라 주세요.',
+    vf_go: '보정 후 다시 측정해 확인', vf_note: '보정을 건 측정음을 재생해 실제 결과를 그래프에 겹쳐 보여 줍니다.', lg_meas: '보정 후(실측)',
     s1_k: '1단계 · 장치', s1_h: '스피커와 마이크를 골라 주세요',
     s1_perm: '마이크 사용을 허용해 주세요. 소리는 이 브라우저 안에서만 처리되고 어디로도 전송되지 않습니다.',
     s1_allow: '마이크 허용하기', s1_in: '마이크', s1_out: '스피커 (출력 장치)', s1_out_default: '시스템 기본 출력',
@@ -434,6 +454,16 @@ const TEXT = {
     ph_limit: 'A phone mic is treated as a regular mic, so only the range below 300 Hz is corrected.', ph_err: 'The phone connection service is unavailable ({e}). Please try again shortly.',
     s3_p_phone: 'Put the phone at ear height where you usually listen. Point the bottom of the phone (where the mic is) at the speakers, and rest it on a stand or cushion instead of holding it.',
     s4_phone_fail: 'No recording arrived from the phone. Check that its screen is on and it is connected, then measure again.',
+    s1_sub: 'Also measure the subwoofer channel', s1_sub_d: 'This output device has 5.1 channels. Turn this on if your subwoofer is on its own (LFE) channel.',
+    s1_nosub: 'This output device is set to 2 channels, so the subwoofer channel cannot be measured separately. Set the speaker configuration to 5.1 in Windows sound settings, then reload this page.',
+    s4_SUB: 'Measuring subwoofer…', s5_sub: 'Subwoofer', s4_prev: 'Any correction applied earlier must be off while measuring. If the helper is running, it is turned off automatically.',
+    s5_strength: 'Correction style', st_keep: 'Keep volume (recommended)', st_keep_d: 'Only reduces boomy ranges. Overall volume stays the same.',
+    st_fill: 'Also raise weak ranges', st_fill_d: 'Raises weak ranges by up to 4 dB. Overall volume drops by the same amount.',
+    s5_vol: 'Overall volume change: {v} dB', s5_listen: 'Listen to the corrected sound',
+    pv_play: 'Play', pv_stop: 'Stop', pv_before: 'Before', pv_after: 'After', pv_file: 'Use my own music file (optional)',
+    pv_note: 'Switch between before and after while a test sound or your own music plays in this browser. If a correction is already applied on this PC, turn it off first.',
+    pv_bad: 'This file cannot be played. Choose a music file such as mp3, wav or flac.',
+    vf_go: 'Measure again with correction', vf_note: 'Plays the measurement tone with the correction applied and overlays the real result on the graph.', lg_meas: 'After (measured)',
     s1_k: 'Step 1 · Devices', s1_h: 'Choose your speakers and microphone',
     s1_perm: 'Please allow microphone access. Audio is processed only in this browser and is not sent anywhere.',
     s1_allow: 'Allow microphone', s1_in: 'Microphone', s1_out: 'Speakers (output device)', s1_out_default: 'System default output',
@@ -486,12 +516,16 @@ const S = {
   mic: 'gen', cal: null, calMsg: '', procWarn: '', permError: false,
   testing: false, level: -90, measuring: '', measureMsg: '', measureWarn: '',
   source: 'pc', phone: { peer: null, conn: null, code: '', url: '', qr: '', status: '', fs: 0, proc: '', err: '', wait: null },
+  outCh: 2, subAvail: false, useSub: false, boost: false, pvMode: 'after', pvPlaying: false, pvBuf: null, pvMsg: '',
   result: null, taste: 'flat', view: 'L', helper: null, applyMsg: '', applyState: '',
 };
 const SWEEP = { f1: 20, f2: 20000, dur: 5 };
 /* 공개 주소(HTTPS). 도우미(127.0.0.1)로 열었을 때 폰 QR에 쓸 주소. 예: 'https://아이디.github.io/bangeum-jangin/' */
 const PUBLIC_BASE = '';
 const HELPER = location.port === '8765' ? '' : 'http://127.0.0.1:8765';
+const QS = new URLSearchParams(location.search);
+const SUB_INDEX = QS.get('sub') === 'test' ? 1 : 3;          /* 5.1 순서: L R C LFE SL SR */
+const CH_INDEX = { L: 0, R: 1, SUB: SUB_INDEX }, CH_LABEL = { L: 's5_left', R: 's5_right', SUB: 's5_sub' }, CH_APO = { L: 'L', R: 'R', SUB: 'LFE' };
 const $ = id => document.getElementById(id);
 const t = (k, v) => { let s = TEXT[S.lang][k] || k; if (v) for (const key in v) s = s.replace('{' + key + '}', v[key]); return s; };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -514,7 +548,7 @@ const VIEWS = [
     let h = '<p class="kicker">' + t('s1_k') + '</p><h1>' + t('s1_h') + '</h1>';
     h += '<p style="margin:0 0 6px;font-size:14px;color:var(--muted)">' + t('src_q') + '</p><div class="choices">' +
       choice('source', 'pc', S.source, t('src_pc'), t('src_pc_d')) + choice('source', 'phone', S.source, t('src_phone'), t('src_phone_d')) + '</div>';
-    if (S.source === 'phone') return h + phoneView() + nav(0, 2, null, S.phone.status !== 'ok');
+    if (S.source === 'phone') return h + phoneView() + (S.phone.status === 'ok' ? subView() : '') + nav(0, 2, null, S.phone.status !== 'ok');
     if (!S.stream) {
       h += '<p>' + t('s1_perm') + '</p>' + (S.permError ? '<p class="note bad">' + t('s1_denied') + '</p>' : '') +
         '<button class="btn primary" id="allow">' + t('s1_allow') + '</button>' + nav(0, null);
@@ -528,7 +562,7 @@ const VIEWS = [
     h += '<p style="margin:0 0 6px;font-size:14px;color:var(--muted)">' + t('s1_mic') + '</p><div class="choices">' +
       choice('mic', 'cal', S.mic, t('mic_cal'), t('mic_cal_d')) + choice('mic', 'gen', S.mic, t('mic_gen'), t('mic_gen_d')) + '</div>';
     if (S.mic === 'cal') h += '<label class="field">' + t('s1_calfile') + '<input type="file" id="calFile" accept=".txt,.cal,.csv,.frd"></label>' + (S.calMsg ? '<p class="note ' + (S.cal ? 'good' : 'bad') + '">' + S.calMsg + '</p>' : '');
-    return h + nav(0, 2);
+    return h + subView() + nav(0, 2);
   },
 
   () => '<p class="kicker">' + t('s2_k') + '</p><h1>' + t('s2_h') + '</h1><p>' + t('s2_p') + '</p><p class="note warn">' + t('s2_warn') + '</p>' +
@@ -544,7 +578,7 @@ const VIEWS = [
     '<p>' + t(S.source === 'phone' ? 's3_p_phone' : 's3_p') + '</p><p class="note">' + t('s3_tips') + '</p>' + nav(2, 4),
 
   () => {
-    let h = '<p class="kicker">' + t('s4_k') + '</p><h1>' + t('s4_h') + '</h1><p>' + t('s4_p') + '</p>';
+let h = '<p class="kicker">' + t('s4_k') + '</p><h1>' + t('s4_h') + '</h1><p>' + t('s4_p') + '</p>' + (S.demo || S.measuring ? '' : '<p class="note">' + t('s4_prev') + '</p>');
     if (S.measuring) h += '<p class="progress">' + t('s4_' + S.measuring) + '</p><div class="meter"><i id="bar"></i></div>';
     else {
       if (S.measureMsg) h += '<p class="note bad">' + t(S.measureMsg) + '</p>';
@@ -558,15 +592,26 @@ const VIEWS = [
     let h = '<p class="kicker">' + t('s5_k') + '</p><h1>' + t('s5_h') + '</h1>';
     if (S.demo) h += '<p class="note">' + t('demo_badge') + '</p>';
     if (S.measureWarn) h += '<p class="note warn">' + t(S.measureWarn) + '</p>';
-    h += '<div class="tabs" role="group"><button type="button" data-view="L" aria-pressed="' + (S.view === 'L') + '">' + t('s5_left') + '</button><button type="button" data-view="R" aria-pressed="' + (S.view === 'R') + '">' + t('s5_right') + '</button></div>';
-    h += '<canvas id="plot" role="img" aria-label="' + t('s5_h') + '"></canvas><div class="legend"><span><i style="background:var(--before)"></i>' + t('lg_before') + '</span><span><i style="background:var(--accent)"></i>' + t('lg_after') + '</span><span><i style="background:var(--ink);height:1px"></i>' + t('lg_target') + '</span></div>';
+    h += '<div class="tabs" role="group">' + r.order.map(c => '<button type="button" data-view="' + c + '" aria-pressed="' + (S.view === c) + '">' + t(CH_LABEL[c]) + '</button>').join('') + '</div>';
+    h += '<canvas id="plot" role="img" aria-label="' + t('s5_h') + '"></canvas><div class="legend"><span><i style="background:var(--before)"></i>' + t('lg_before') + '</span><span><i style="background:var(--accent)"></i>' + t('lg_after') + '</span>' +
+      (ch.verified ? '<span><i style="background:var(--good)"></i>' + t('lg_meas') + '</span>' : '') + '<span><i style="background:var(--ink);height:1px"></i>' + t('lg_target') + '</span></div>';
     h += '<p style="margin:0 0 6px;font-size:14px;color:var(--muted)">' + t('s5_taste') + '</p><div class="choices">' +
       choice('taste', 'flat', S.taste, t('taste_flat'), t('taste_flat_d')) + choice('taste', 'warm', S.taste, t('taste_warm'), t('taste_warm_d')) + '</div>';
+    h += '<p style="margin:0 0 6px;font-size:14px;color:var(--muted)">' + t('s5_strength') + '</p><div class="choices">' +
+      choice('boost', 'keep', S.boost ? 'fill' : 'keep', t('st_keep'), t('st_keep_d')) + choice('boost', 'fill', S.boost ? 'fill' : 'keep', t('st_fill'), t('st_fill_d')) + '</div>';
+    h += '<p class="meterlabel" style="margin-bottom:14px">' + t('s5_vol', { v: (r.preamp > 0 ? '+' : '') + r.preamp.toFixed(1) }) + '</p>';
     h += '<p style="margin:0 0 6px;font-weight:600">' + t('s5_found') + '</p>';
     if (!ch.filters.length) h += '<p>' + t('s5_none') + '</p>';
     else h += '<ul class="find">' + ch.filters.map(p => '<li>' + t(p.gain < 0 ? 'f_cut' : 'f_boost', { f: Math.round(p.fc), band: t(bandName(p.fc)), g: Math.abs(p.gain).toFixed(1) }) + '</li>').join('') + '</ul>';
     if (ch.rolloff > 45) h += '<p class="note">' + t('s5_roll', { f: Math.round(ch.rolloff) }) + '</p>';
     if (limited()) h += '<p class="note">' + t(S.source === 'phone' ? 'ph_limit' : 's5_limit') + '</p>';
+    if (!S.demo) {
+      h += '<p style="margin:18px 0 6px;font-weight:600">' + t('s5_listen') + '</p><p class="note">' + t('pv_note') + '</p><div class="row">' +
+        '<button class="btn" id="pvToggle">' + t(S.pvPlaying ? 'pv_stop' : 'pv_play') + '</button>' +
+        '<div class="tabs" role="group" style="margin:0"><button type="button" data-pv="before" aria-pressed="' + (S.pvMode === 'before') + '">' + t('pv_before') + '</button><button type="button" data-pv="after" aria-pressed="' + (S.pvMode === 'after') + '">' + t('pv_after') + '</button></div></div>' +
+        '<label class="field" style="margin-top:12px">' + t('pv_file') + '<input type="file" id="pvFile" accept="audio/*"></label>' + (S.pvMsg ? '<p class="note bad">' + S.pvMsg + '</p>' : '') +
+        '<div class="row"><button class="btn" id="verify">' + t('vf_go') + '</button></div><p class="note" style="margin-top:8px">' + t('vf_note') + '</p>';
+    }
     return h + nav(4, 6);
   },
 
@@ -586,6 +631,11 @@ const VIEWS = [
   },
 ];
 
+function subView() {
+  if (!S.ctx) return '';
+  if (!S.subAvail) return '<details><summary>' + t('s5_sub') + '</summary><p style="margin-top:8px">' + t('s1_nosub') + '</p></details>';
+  return '<label class="choice' + (S.useSub ? ' on' : '') + '" style="margin-bottom:14px"><input type="checkbox" id="useSub"' + (S.useSub ? ' checked' : '') + '><b>' + t('s1_sub') + '</b><span>' + t('s1_sub_d') + '</span></label>';
+}
 function limited() { return !S.demo && (S.source === 'phone' || S.mic === 'gen'); }
 function phoneView() {
   const P = S.phone;
@@ -608,6 +658,7 @@ function render() {
 }
 function go(step) {
   if (S.testing) stopTest();
+  stopPreview();
   if (step === 0) { S.demo = false; S.measureMsg = ''; }
   S.step = step; S.applyMsg = S.step === 6 ? S.applyMsg : '';
   render();
@@ -631,8 +682,15 @@ async function openMic(deviceId) {
   S.devices.outs = list.filter(d => d.kind === 'audiooutput');
 }
 async function ensureCtx() {
-  if (!S.ctx) S.ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
+  if (!S.ctx) { S.ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' }); setupOutput(); }
   if (S.ctx.state === 'suspended') await S.ctx.resume();
+}
+/* 출력 채널 수 확인: 6채널 이상이면 서브우퍼(LFE) 채널을 따로 쓸 수 있다 */
+function setupOutput() {
+  const d = S.ctx.destination, forced = QS.get('sub') === 'test';
+  S.subAvail = forced || (d.maxChannelCount || 2) >= 6; if (!S.subAvail) S.useSub = false;
+  const n = S.useSub && !forced ? 6 : 2;
+  try { d.channelCount = n; d.channelCountMode = 'explicit'; d.channelInterpretation = 'discrete'; S.outCh = n; } catch (e) { S.outCh = 2; }
 }
 /* ----- 스마트폰 연결 (WebRTC 데이터 채널, PeerJS) ----- */
 function peerOptions() {
@@ -703,7 +761,7 @@ function showLevel() {
 /* 한쪽 채널로 스윕을 재생하고, 끝난 뒤(여유 포함) 완료된다 */
 function playSweep(sweep, channel, lead = 0.4, tail = 1.2) {
   return new Promise(resolve => {
-    const buf = S.ctx.createBuffer(2, sweep.length, S.ctx.sampleRate);
+    const buf = S.ctx.createBuffer(Math.max(S.outCh, channel + 1), sweep.length, S.ctx.sampleRate);
     buf.copyToChannel(Float32Array.from(sweep), channel);
     const src = S.ctx.createBufferSource(); src.buffer = buf; src.connect(S.ctx.destination);
     src.start(S.ctx.currentTime + lead);
@@ -743,18 +801,27 @@ const DEMO_ROOMS = {
   R: [{ fc: 48, gain: 7, q: 5 }, { fc: 95, gain: 5, q: 6 }, { fc: 240, gain: -4, q: 3 }, { fc: 3200, gain: 3, q: 2 }],
 };
 const pause = ms => new Promise(r => setTimeout(r, ms));
-async function measure() {
-  S.measureMsg = ''; S.measureWarn = '';
+async function helperOff() { try { await helperCall('/api/apply', { config: '# off\n', enabled: false }); S.applyState = 'off'; } catch (e) {} }
+/* verify = true 이면 계산된 보정을 건 측정음으로 다시 측정해 실제 결과를 겹쳐 보여 준다 */
+async function measure(verify) {
+  stopPreview(); S.measureMsg = ''; if (!verify) S.measureWarn = '';
   const phone = !S.demo && S.source === 'phone';
+  if (!S.demo) { await ensureCtx(); await helperOff(); }
   const fsOut = S.demo ? 48000 : S.ctx.sampleRate, fs = phone ? S.phone.fs : fsOut;   /* fs: 녹음 쪽 샘플레이트 */
   const f2 = Math.min(SWEEP.f2, 0.92 * Math.min(fs, fsOut) / 2);
-  const sweepOut = DSP.logSweep(SWEEP.f1, f2, SWEEP.dur, fsOut), sweep = fs === fsOut ? sweepOut : DSP.logSweep(SWEEP.f1, f2, SWEEP.dur, fs), raw = {};
-  for (const [i, ch] of ['L', 'R'].entries()) {
+  const sweepOut = DSP.logSweep(SWEEP.f1, f2, SWEEP.dur, fsOut), sweep = fs === fsOut ? sweepOut : DSP.logSweep(SWEEP.f1, f2, SWEEP.dur, fs);
+  const order = verify ? S.result.order : ['L', 'R'].concat(!S.demo && S.useSub ? ['SUB'] : []), raw = {};
+  if (verify) S.step = 4;
+  for (const [i, ch] of order.entries()) {
     S.measuring = ch; render();
-    let rec;
-    if (S.demo) { await pause(500); rec = DSP.simulateRoom(sweep, fs, DEMO_ROOMS[ch], i + 3); }
+    let rec, out = sweepOut;
+    if (verify) {                                  /* 보정 필터와 프리앰프를 측정음에 미리 건다 */
+      for (const p of S.result[ch].filters) out = DSP.biquad(out, DSP.peakCoeffs(fsOut, p.fc, p.gain, p.q));
+      const g = Math.pow(10, S.result.preamp / 20); out = out.map(v => v * g);
+    }
+    if (S.demo) { await pause(500); rec = DSP.simulateRoom(out, fs, DEMO_ROOMS[ch], i + 3); }
     else {
-      try { rec = phone ? await capturePhone(sweepOut, i) : await captureLocal(sweepOut, i); }
+      try { rec = phone ? await capturePhone(out, CH_INDEX[ch]) : await captureLocal(out, CH_INDEX[ch]); }
       catch (err) { S.measuring = ''; S.measureMsg = 's4_phone_fail'; render(); return; }
       const chk = checkRecording(rec, fs);
       if (chk.error) { S.measuring = ''; S.measureMsg = chk.error; render(); return; }
@@ -763,20 +830,59 @@ async function measure() {
     S.measuring = 'calc'; render(); await pause(30);
     raw[ch] = DSP.responseFromRecording(rec, sweep, fs, !S.demo && !phone && S.mic === 'cal' ? S.cal : null);
   }
-  S.result = { fs, raw }; S.measuring = '';
-  computeCorrection(); go(5);
+  S.measuring = '';
+  if (verify) for (const ch of order) S.result[ch].verified = raw[ch].resp;
+  else { S.result = { fs, raw, order }; S.view = 'L'; computeCorrection(); }
+  go(5);
 }
 function computeCorrection() {
-  const r = S.result, tilt = S.taste === 'warm' ? -0.4 : 0, fHi = limited() ? 300 : 16000, chans = {};
-  for (const ch of ['L', 'R']) {
-    const { grid, resp } = r.raw[ch], tc = DSP.targetCurve(grid, resp, tilt);
-    const filters = DSP.design(grid, resp, tc.target, r.fs, { fHi });
+  const r = S.result, tilt = S.taste === 'warm' ? -0.4 : 0, chans = {}; let pre = 0;
+  for (const ch of r.order) {
+    const { grid, resp } = r.raw[ch], sub = ch === 'SUB';
+    const tc = sub ? DSP.targetCurve(grid, resp, 0, { refLo: 40, refHi: 80, searchHi: 45 }) : DSP.targetCurve(grid, resp, tilt);
+    const opts = sub ? { fLo: 20, fHi: 120 } : { fHi: limited() ? 300 : 16000 }; opts.maxBoost = S.boost ? 4 : 0;
+    const filters = DSP.design(grid, resp, tc.target, r.fs, opts);
     r[ch] = { grid, resp, target: tc.target, level: tc.level, rolloff: tc.rolloff, filters, after: DSP.eqDb(grid, r.fs, filters).map((e, i) => e + resp[i]) };
-    chans[ch] = filters;
+    chans[CH_APO[ch]] = filters; pre = Math.min(pre, DSP.preampDb(r.fs, filters));
   }
-  r.preamp = Math.min(DSP.preampDb(r.fs, chans.L), DSP.preampDb(r.fs, chans.R));
-  r.config = DSP.formatConfig(chans, r.preamp);
+  r.preamp = pre; r.config = DSP.formatConfig(chans, r.preamp);
 }
+
+/* ----- 보정된 소리 들어 보기 ----- */
+let pv = null;
+function previewBuffer() {
+  if (S.pvBuf) return S.pvBuf;
+  const fs = S.ctx.sampleRate, n = fs * 4, buf = S.ctx.createBuffer(Math.max(2, SUB_INDEX + 1), n, fs);
+  for (const c of [0, 1, SUB_INDEX]) {
+    const d = buf.getChannelData(c); let b0 = 0, b1 = 0, b2 = 0, lp1 = 0, lp2 = 0; const k = 1 - Math.exp(-2 * Math.PI * 100 / fs);
+    for (let i = 0; i < n; i++) {
+      const w = Math.random() * 2 - 1; b0 = 0.99765 * b0 + w * 0.099046; b1 = 0.963 * b1 + w * 0.2965164; b2 = 0.57 * b2 + w * 1.0526913;
+      let v = (b0 + b1 + b2 + w * 0.1848) * 0.05;
+      if (c === SUB_INDEX && c > 1) { lp1 += k * (v - lp1); lp2 += k * (lp1 - lp2); v = lp2 * 2; }   /* 서브우퍼에는 저음만 */
+      d[i] = v;
+    }
+  }
+  return buf;
+}
+async function startPreview() {
+  await ensureCtx(); stopPreview();
+  const r = S.result, c = S.ctx, buf = previewBuffer(), src = c.createBufferSource(), n = Math.max(2, S.outCh);
+  const split = c.createChannelSplitter(Math.max(2, buf.numberOfChannels)), merge = c.createChannelMerger(n), master = c.createGain();
+  src.buffer = buf; src.loop = true; src.connect(split);
+  pv = { src, master, dry: [], wet: [] };
+  for (const ch of r.order) {
+    const i = CH_INDEX[ch]; if (i >= buf.numberOfChannels || i >= n) continue;
+    const dry = c.createGain(), wet = c.createGain(), pre = c.createGain(); pre.gain.value = Math.pow(10, r.preamp / 20);
+    let last = null;
+    for (const p of r[ch].filters) { const f = c.createBiquadFilter(); f.type = 'peaking'; f.frequency.value = p.fc; f.gain.value = p.gain; f.Q.value = p.q; last ? last.connect(f) : split.connect(f, i); last = f; }
+    last ? last.connect(pre) : split.connect(pre, i); pre.connect(wet); split.connect(dry, i);
+    dry.connect(merge, 0, i); wet.connect(merge, 0, i); pv.dry.push(dry); pv.wet.push(wet);
+  }
+  master.gain.setValueAtTime(0.0001, c.currentTime); master.gain.exponentialRampToValueAtTime(1, c.currentTime + 1);
+  merge.connect(master); master.connect(c.destination); setPreviewMode(S.pvMode); src.start(); S.pvPlaying = true;
+}
+function setPreviewMode(m) { S.pvMode = m; if (pv) { pv.dry.forEach(g => g.gain.value = m === 'before' ? 1 : 0); pv.wet.forEach(g => g.gain.value = m === 'before' ? 0 : 1); } }
+function stopPreview() { if (pv) { try { pv.src.stop(); } catch (e) {} pv.master.disconnect(); pv = null; } S.pvPlaying = false; }
 
 /* ----- 그래프 ----- */
 function drawPlot() {
@@ -803,6 +909,7 @@ function drawPlot() {
     g.stroke(); g.restore();
   };
   line(ch.target, css('--ink'), 1, [5, 4]); line(ch.resp, css('--before'), 2); line(ch.after, css('--accent'), 2.5);
+  if (ch.verified) line(ch.verified, css('--good'), 2);
 }
 
 /* ----- 도우미 ----- */
@@ -827,17 +934,20 @@ function download() {
 }
 
 /* ----- 이벤트 ----- */
-document.querySelector('.lang').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { S.lang = b.dataset.lang; if (S.applyMsg) S.applyMsg = ''; render(); } });
+document.querySelector('.lang').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { S.lang = b.dataset.lang; S.applyMsg = ''; S.pvMsg = ''; render(); } });
 $('view').addEventListener('click', async e => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.go !== undefined) return go(Number(b.dataset.go));
   if (b.dataset.view) { S.view = b.dataset.view; return render(); }
+  if (b.dataset.pv) { setPreviewMode(b.dataset.pv); return render(); }
   switch (b.id) {
     case 'start': S.demo = false; if (S.source === 'phone') startPhone(); return go(1);
     case 'demo': S.demo = true; go(4); return measure();
     case 'allow': try { await openMic(); S.permError = false; } catch (err) { S.permError = true; } return render();
     case 'test': S.testing ? stopTest() : startTest(); return render();
     case 'measure': return measure();
+    case 'verify': return measure(true);
+    case 'pvToggle': if (S.pvPlaying) stopPreview(); else await startPreview(); return render();
     case 'apply': return applyConfig(true);
     case 'toggle': return applyConfig(S.applyState === 'off');
     case 'download': return download();
@@ -846,10 +956,19 @@ $('view').addEventListener('click', async e => {
 $('view').addEventListener('change', async e => {
   const el = e.target;
   if (el.id === 'inSel') { try { await openMic(el.value); } catch (err) { S.permError = true; S.stream = null; } render(); }
-  else if (el.id === 'outSel') { S.outId = el.value; try { await S.ctx.setSinkId(el.value); } catch (err) {} }
+  else if (el.id === 'outSel') { S.outId = el.value; try { await S.ctx.setSinkId(el.value); } catch (err) {} setupOutput(); render(); }
   else if (el.name === 'mic') { S.mic = el.value; render(); }
   else if (el.name === 'source') { S.source = el.value; if (S.source === 'phone') { try { await ensureCtx(); } catch (err) {} startPhone(); } render(); }
-  else if (el.name === 'taste') { S.taste = el.value; computeCorrection(); render(); }
+  else if (el.name === 'taste' || el.name === 'boost') {
+    if (el.name === 'taste') S.taste = el.value; else S.boost = el.value === 'fill';
+    const playing = S.pvPlaying; computeCorrection(); if (playing) await startPreview(); render();
+  }
+  else if (el.id === 'useSub') { S.useSub = el.checked; setupOutput(); render(); }
+  else if (el.id === 'pvFile' && el.files[0]) {
+    try { await ensureCtx(); S.pvBuf = await S.ctx.decodeAudioData(await el.files[0].arrayBuffer()); S.pvMsg = ''; if (S.pvPlaying) await startPreview(); }
+    catch (err) { S.pvBuf = null; S.pvMsg = t('pv_bad'); }
+    render();
+  }
   else if (el.id === 'calFile' && el.files[0]) {
     try { S.cal = DSP.parseCalibration(await el.files[0].text()); S.calMsg = t('s1_cal_ok', { n: S.cal.f.length }); }
     catch (err) { S.cal = null; S.calMsg = t('s1_cal_bad'); }
