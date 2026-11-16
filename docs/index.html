@@ -89,6 +89,7 @@ summary{cursor:pointer;color:var(--muted);font-size:14px}
 <main>
   <ol class="steps" id="steps" aria-hidden="true"></ol>
   <section class="card" id="view" aria-live="polite"></section>
+  <p style="text-align:center;color:var(--muted);font-size:12px;margin-top:14px">v0.5 · 2026-11-16</p>
 </main>
 
 <script src="vendor/qrcode.js"></script>
@@ -950,7 +951,8 @@ function computeCorrection() {
     const { grid, resp } = r.raw[ch], sub = ch === 'SUB';
     const tc = sub ? DSP.targetCurve(grid, resp, 0, { refLo: 40, refHi: 80, searchHi: 45 }) : DSP.targetCurve(grid, resp, tilt);
     const useXo = S.xo.on && r.order.includes('SUB');
-    const opts = sub ? { fLo: 20, fHi: useXo ? Math.min(200, S.xo.fc * 1.5) : 120 } : { fHi: limited() ? 300 : 16000 }; opts.maxBoost = S.boost ? 4 : 0;
+    /* 크로스오버를 쓰면 좌우 스피커는 그 아래 음역을 내지 않으므로, 좌우 보정은 크로스오버 위쪽에만 쓴다 */
+    const opts = sub ? { fLo: 20, fHi: useXo ? Math.min(200, S.xo.fc * 1.5) : 120 } : { fLo: useXo ? S.xo.fc : 40, fHi: limited() ? 300 : 16000 }; opts.maxBoost = S.boost ? 4 : 0;
     const filters = DSP.design(grid, resp, tc.target, r.fs, opts);
     r[ch] = { grid, resp, target: tc.target, level: tc.level, rolloff: tc.rolloff, filters, after: DSP.eqDb(grid, r.fs, filters).map((e, i) => e + resp[i]) };
     chans[CH_APO[ch]] = filters; pre = Math.min(pre, DSP.preampDb(r.fs, filters));
