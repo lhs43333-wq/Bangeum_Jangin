@@ -1,0 +1,25 @@
+const fs = require('fs'), path = require('path');
+const html = fs.readFileSync(path.join(__dirname, '..', 'docs', 'index.html'), 'utf8');
+const src = html.match(/<script id="dsp">([\s\S]*?)<\/script>/)[1];
+const m = { exports: {} }; new Function('module', src)(m); const DSP = m.exports;
+const FS = 48000, sweep = DSP.logSweep(20, 20000, 5, FS);
+const modes = [{fc:55,gain:9,q:6},{fc:110,gain:-5,q:4},{fc:180,gain:6,q:5},{fc:2500,gain:4,q:1.5}];
+let t0 = Date.now();
+const { grid, resp } = DSP.responseFromRecording(DSP.simulateRoom(sweep, FS, modes, 3), sweep, FS);
+const tc = DSP.targetCurve(grid, resp, 0), filters = DSP.design(grid, resp, tc.target, FS);
+const ms = Date.now() - t0;
+const rms = v => { let s=0,n=0; for (let i=0;i<grid.length;i++) if (grid[i]>=40&&grid[i]<=16000){ s+=v[i]*v[i]; n++; } return Math.sqrt(s/n); };
+const eq = DSP.eqDb(grid, FS, filters);
+const before = rms(resp.map((r,i)=>r-tc.target[i])), after = rms(resp.map((r,i)=>r+eq[i]-tc.target[i]));
+// EQ를 실제로 걸고 재측정
+let x = sweep; for (const p of filters) x = DSP.biquad(x, DSP.peakCoeffs(FS, p.fc, p.gain, p.q));
+const re = DSP.responseFromRecording(DSP.simulateRoom(x, FS, modes, 3), sweep, FS);
+const remeasured = rms(re.resp.map((r,i)=>r-tc.target[i]));
+console.log('rolloff', tc.rolloff.toFixed(1), 'Hz, time', ms, 'ms');
+filters.forEach(p => console.log(' ', p.fc.toFixed(1), p.gain.toFixed(1), p.q.toFixed(2)));
+console.log('RMS before', before.toFixed(2), 'predicted', after.toFixed(2), 'remeasured', remeasured.toFixed(2));
+console.log(DSP.formatConfig({L: filters, R: filters}, DSP.preampDb(FS, filters)));
+const cal = DSP.parseCalibration('"Sens Factor =-1.2dB"\n20 1.0\n1000 0.0\n20000\t-2.0\n');
+const c = DSP.applyCalibration(grid, resp, cal);
+const ok = after < 0.5*before && remeasured < 0.5*before && Math.abs((resp[0]-c[0]) - 1.0) < 1e-9 && cal.f.length === 3;
+console.log(ok ? 'PASS' : 'FAIL'); process.exit(ok ? 0 : 1);

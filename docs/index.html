@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>방음장인</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --bg:#f6f5f1; --card:#ffffff; --ink:#1c1b19; --muted:#6b6a65; --line:#dedcd4;
+  --accent:#1f5fd1; --accent-ink:#ffffff; --accent-soft:#e6eefc;
+  --good:#1a7f4b; --warn:#a15c00; --bad:#b3261e; --before:#a9a7a0;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#161614; --card:#201f1d; --ink:#f0eee8; --muted:#a3a19a; --line:#3a3936;
+    --accent:#7aa7ff; --accent-ink:#0d1b36; --accent-soft:#1d2a44;
+    --good:#5fd08f; --warn:#f0b35a; --bad:#ff8a80; --before:#77756f; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:16px/1.6 "Pretendard","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  max-width:820px;margin:0 auto;padding:20px 20px 0}
+.brand{font-weight:700;font-size:18px;letter-spacing:-.01em}
+.brand small{font-weight:400;color:var(--muted);margin-left:8px;font-size:13px}
+.lang{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.lang button{border:0;background:transparent;color:var(--muted);padding:6px 12px;font:inherit;font-size:14px;cursor:pointer}
+.lang button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+main{max-width:820px;margin:0 auto;padding:16px 20px 60px}
+.steps{display:flex;gap:6px;margin:12px 0 20px;padding:0;list-style:none}
+.steps li{flex:1;height:4px;border-radius:2px;background:var(--line)}
+.steps li.done{background:var(--accent)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px}
+.kicker{color:var(--muted);font-size:13px;margin:0 0 4px}
+h1{font-size:26px;line-height:1.3;margin:0 0 10px;letter-spacing:-.02em;text-wrap:balance}
+p{margin:0 0 14px}
+.lead{color:var(--muted)}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px;justify-content:space-between}
+button.btn{font:inherit;font-weight:600;border-radius:10px;padding:11px 20px;cursor:pointer;
+  border:1px solid var(--line);background:transparent;color:var(--ink)}
+button.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button.btn:disabled{opacity:.45;cursor:not-allowed}
+button.btn:focus-visible,select:focus-visible,input:focus-visible,.choice:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+label.field{display:block;margin:0 0 14px;font-size:14px;color:var(--muted)}
+select,input[type=file]{display:block;width:100%;margin-top:4px;font:inherit;color:var(--ink);
+  background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px}
+.choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:0 0 14px}
+.choice{display:block;border:1px solid var(--line);border-radius:10px;padding:14px;cursor:pointer}
+.choice input{position:absolute;opacity:0}
+.choice b{display:block}
+.choice span{color:var(--muted);font-size:14px}
+.choice.on{border-color:var(--accent);background:var(--accent-soft)}
+.note{border-left:3px solid var(--line);padding:2px 0 2px 12px;color:var(--muted);font-size:14px;margin:0 0 14px}
+.note.warn{border-color:var(--warn);color:var(--warn)}
+.note.bad{border-color:var(--bad);color:var(--bad)}
+.note.good{border-color:var(--good);color:var(--good)}
+.meter{height:14px;border-radius:7px;background:var(--line);overflow:hidden;margin:6px 0 4px;position:relative}
+.meter i{display:block;height:100%;width:0;background:var(--good);transition:width .08s linear}
+.meter .zone{position:absolute;top:0;bottom:0;left:50%;width:40%;border-left:2px solid var(--ink);border-right:2px solid var(--ink);opacity:.35}
+.meterlabel{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+canvas{width:100%;height:300px;display:block;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin:8px 0 16px}
+.legend i{display:inline-block;width:18px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+ul.find{margin:0 0 14px;padding-left:20px}
+ul.find li{margin-bottom:4px}
+.tabs{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:10px}
+.tabs button{border:0;background:transparent;color:var(--muted);padding:6px 16px;font:inherit;font-size:14px;cursor:pointer}
+.tabs button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:13px;overflow:auto;max-height:200px}
+.progress{font-variant-numeric:tabular-nums;font-size:15px}
+svg.pic{width:100%;max-width:520px;height:auto;display:block;margin:6px auto 16px}
+.qr{width:220px;max-width:70%;margin:6px auto 14px;background:#fff;padding:10px;border-radius:10px;border:1px solid var(--line)}
+.qr svg{display:block;width:100%;height:auto}
+a{color:var(--accent);word-break:break-all}
+details{margin:0 0 14px}
+summary{cursor:pointer;color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">방음장인<small id="tagline"></small></div>
+  <div class="lang" role="group" aria-label="Language">
+    <button type="button" data-lang="ko">한국어</button>
+    <button type="button" data-lang="en">English</button>
+  </div>
+</header>
+<main>
+  <ol class="steps" id="steps" aria-hidden="true"></ol>
+  <section class="card" id="view" aria-live="polite"></section>
+</main>
+
+<script src="vendor/qrcode.js"></script>
+<script src="vendor/peerjs.min.js"></script>
+<script id="dsp">
+/* ===== 방음장인 신호처리 코어 (화면과 무관, Node에서도 실행 가능) ===== */
+const DSP = (() => {
+  function logSweep(f1, f2, dur, fs, amp = 0.5, fade = 0.02) {
+    const n = Math.round(dur * fs), x = new Float64Array(n);
+    const rate = dur / Math.log(f2 / f1);
+    for (let i = 0; i < n; i++) x[i] = amp * Math.sin(2 * Math.PI * f1 * rate * (Math.exp(i / fs / rate) - 1));
+    const nf = Math.max(1, Math.floor(fade * fs));
+    for (let i = 0; i < nf; i++) { const w = 0.5 * (1 - Math.cos(Math.PI * i / nf)); x[i] *= w; x[n - 1 - i] *= w; }
+    return x;
+  }
+  function nextPow2(n) { let p = 1; while (p < n) p <<= 1; return p; }
+  function fft(re, im, inverse) {
+    const n = re.length;
+    for (let i = 1, j = 0; i < n; i++) {
+      let bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+    }
+    for (let len = 2; len <= n; len <<= 1) {
+      const ang = (inverse ? 2 : -2) * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang), half = len >> 1;
+      for (let i = 0; i < n; i += len) {
+        let cr = 1, ci = 0;
+        for (let k = 0; k < half; k++) {
+          const a = i + k, b = a + half;
+          const xr = re[b] * cr - im[b] * ci, xi = re[b] * ci + im[b] * cr;
+          re[b] = re[a] - xr; im[b] = im[a] - xi; re[a] += xr; im[a] += xi;
+          const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+        }
+      }
+    }
+    if (inverse) for (let i = 0; i < n; i++) { re[i] /= n; im[i] /= n; }
+  }
+  function padded(x, n) { const o = new Float64Array(n); o.set(x.length > n ? x.subarray(0, n) : x); return o; }
+  /* 녹음을 스윕으로 디컨볼루션해 임펄스 응답을 구한다 */
+  function impulseResponse(rec, sweep, reg = 1e-6) {
+    const n = nextPow2(rec.length + sweep.length);
+    const xr = padded(sweep, n), xi = new Float64Array(n), yr = padded(rec, n), yi = new Float64Array(n);
+    fft(xr, xi); fft(yr, yi);
+    let pmax = 0;
+    for (let i = 0; i < n; i++) { const p = xr[i] * xr[i] + xi[i] * xi[i]; if (p > pmax) pmax = p; }
+    const eps = reg * pmax;
+    for (let i = 0; i < n; i++) {
+      const d = xr[i] * xr[i] + xi[i] * xi[i] + eps;
+      const hr = (yr[i] * xr[i] + yi[i] * xi[i]) / d, hi = (yi[i] * xr[i] - yr[i] * xi[i]) / d;
+      yr[i] = hr; yi[i] = hi;
+    }
+    fft(yr, yi, true);
+    return yr;
+  }
+  /* 임펄스 응답의 피크 주변을 잘라 주파수 응답(dB)을 구한다 */
+  function frequencyResponse(ir, fs, windowS = 0.5, preS = 0.005) {
+    let peak = 0, pv = 0;
+    for (let i = 0; i < ir.length; i++) { const a = Math.abs(ir[i]); if (a > pv) { pv = a; peak = i; } }
+    const pre = Math.floor(preS * fs), len = Math.floor(windowS * fs), total = pre + len;
+    const nfft = Math.max(131072, nextPow2(total));
+    const re = new Float64Array(nfft), im = new Float64Array(nfft), N = ir.length;
+    for (let i = 0; i < total; i++) re[i] = ir[(((peak - pre + i) % N) + N) % N];
+    for (let i = 0; i < pre; i++) re[i] *= 0.5 * (1 - Math.cos(Math.PI * i / pre));
+    const tail = len >> 1;
+    for (let i = 0; i < tail; i++) re[total - tail + i] *= 0.5 * (1 + Math.cos(Math.PI * i / tail));
+    fft(re, im);
+    const half = nfft / 2 + 1, mag = new Float64Array(half);
+    for (let i = 0; i < half; i++) mag[i] = 10 * Math.log10(Math.max(re[i] * re[i] + im[i] * im[i], 1e-24));
+    return { df: fs / nfft, magDb: mag, peakIndex: peak, peakValue: pv };
+  }
+  function logGrid(lo = 20, hi = 20000, ppo = 48) {
+    const n = Math.ceil(Math.log2(hi / lo) * ppo) + 1, g = new Float64Array(n);
+    for (let i = 0; i < n; i++) g[i] = lo * Math.pow(2, i / ppo);
+    return g;
+  }
+  /* 1/fraction 옥타브 스무딩(파워 평균) + 로그 격자로 옮기기 */
+  function smoothToGrid(df, magDb, grid, fraction = 6) {
+    const n = magDb.length, csum = new Float64Array(n + 1);
+    for (let i = 0; i < n; i++) csum[i + 1] = csum[i] + Math.pow(10, magDb[i] / 10);
+    const half = Math.pow(2, 1 / (2 * fraction)), out = new Float64Array(grid.length);
+    for (let i = 0; i < grid.length; i++) {
+      const a = Math.max(0, Math.ceil(grid[i] / half / df)), b = Math.min(n - 1, Math.floor(grid[i] * half / df));
+      let p;
+      if (b >= a) p = (csum[b + 1] - csum[a]) / (b - a + 1);
+      else {
+        const x = grid[i] / df, k = Math.min(n - 2, Math.floor(x)), t = x - k;
+        p = Math.pow(10, magDb[k] / 10) * (1 - t) + Math.pow(10, magDb[k + 1] / 10) * t;
+      }
+      out[i] = 10 * Math.log10(Math.max(p, 1e-24));
+    }
+    return out;
+  }
+  /* RBJ 피킹 필터 계수 [b0,b1,b2,a1,a2] */
+  function peakCoeffs(fs, fc, gain, q) {
+    const A = Math.pow(10, gain / 40), w0 = 2 * Math.PI * fc / fs, al = Math.sin(w0) / (2 * q), c = Math.cos(w0), a0 = 1 + al / A;
+    return [(1 + al * A) / a0, -2 * c / a0, (1 - al * A) / a0, -2 * c / a0, (1 - al / A) / a0];
+  }
+  function highpassCoeffs(fs, fc, q = Math.SQRT1_2) {
+    const w0 = 2 * Math.PI * fc / fs, al = Math.sin(w0) / (2 * q), c = Math.cos(w0), a0 = 1 + al;
+    return [(1 + c) / 2 / a0, -(1 + c) / a0, (1 + c) / 2 / a0, -2 * c / a0, (1 - al) / a0];
+  }
+  function coeffDb(k, f, fs) {
+    const w = 2 * Math.PI * f / fs, c1 = Math.cos(w), c2 = Math.cos(2 * w);
+    const num = k[0] * k[0] + k[1] * k[1] + k[2] * k[2] + 2 * (k[0] * k[1] + k[1] * k[2]) * c1 + 2 * k[0] * k[2] * c2;
+    const den = 1 + k[3] * k[3] + k[4] * k[4] + 2 * (k[3] + k[3] * k[4]) * c1 + 2 * k[4] * c2;
+    return 10 * Math.log10(Math.max(num / den, 1e-24));
+  }
+  function eqDb(grid, fs, filters) {
+    const out = new Float64Array(grid.length);
+    for (const p of filters) { const k = peakCoeffs(fs, p.fc, p.gain, p.q); for (let i = 0; i < grid.length; i++) out[i] += coeffDb(k, grid[i], fs); }
+    return out;
+  }
+  function biquad(x, k) {
+    const y = new Float64Array(x.length); let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    for (let i = 0; i < x.length; i++) { const v = k[0] * x[i] + k[1] * x1 + k[2] * x2 - k[3] * y1 - k[4] * y2; x2 = x1; x1 = x[i]; y2 = y1; y1 = v; y[i] = v; }
+    return y;
+  }
+  function bandMean(grid, v, lo, hi) { let s = 0, n = 0; for (let i = 0; i < grid.length; i++) if (grid[i] >= lo && grid[i] <= hi) { s += v[i]; n++; } return n ? s / n : 0; }
+  /* 스피커가 낼 수 있는 저음 한계 추정: 1옥타브로 크게 평균한 응답이 레벨보다 3 dB 내려가는 곳 */
+  function rolloffHz(grid, meas, level, drop = 3, searchHi = 200) {
+    const ppo = Math.round(1 / Math.log2(grid[1] / grid[0])), h = ppo >> 1; let f3 = grid[0];
+    for (let i = 0; i < grid.length && grid[i] <= searchHi; i++) {
+      let s = 0;
+      for (let j = i - h; j < i - h + ppo; j++) s += meas[Math.min(grid.length - 1, Math.max(0, j))];
+      if (s / ppo < level - drop) f3 = grid[i];
+    }
+    return f3;
+  }
+  /* 목표 곡선: 중음역 평균 레벨 + 기울기(취향) + 스피커 저음 한계 따라가기 */
+  function targetCurve(grid, meas, tilt = 0) {
+    const level = bandMean(grid, meas, 200, 2000), f3 = rolloffHz(grid, meas, level), t = new Float64Array(grid.length);
+    for (let i = 0; i < grid.length; i++) t[i] = level + tilt * Math.log2(grid[i] / 1000) - 10 * Math.log10(1 + Math.pow(f3 / grid[i], 4));
+    return { target: t, level, rolloff: f3 };
+  }
+  function solve(A, b) {
+    const n = b.length;
+    for (let c = 0; c < n; c++) {
+      let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+      [A[c], A[p]] = [A[p], A[c]]; [b[c], b[p]] = [b[p], b[c]];
+      if (Math.abs(A[c][c]) < 1e-14) continue;
+      for (let r = c + 1; r < n; r++) { const m = A[r][c] / A[c][c]; for (let k = c; k < n; k++) A[r][k] -= m * A[c][k]; b[r] -= m * b[c]; }
+    }
+    const x = new Array(n).fill(0);
+    for (let r = n - 1; r >= 0; r--) { let s = b[r]; for (let k = r + 1; k < n; k++) s -= A[r][k] * x[k]; x[r] = Math.abs(A[r][r]) < 1e-14 ? 0 : s / A[r][r]; }
+    return x;
+  }
+  /* 경계 조건이 있는 레벤버그-마쿼트 최소제곱 */
+  function leastSquares(resFn, x0, lb, ub, iters = 40) {
+    const n = x0.length, clip = v => v.map((a, i) => Math.min(ub[i], Math.max(lb[i], a)));
+    let x = clip(x0), r = resFn(x), cost = r.reduce((s, a) => s + a * a, 0), lam = 1e-2;
+    for (let it = 0; it < iters; it++) {
+      const J = [];
+      for (let j = 0; j < n; j++) {
+        const h = 1e-4, xp = x.slice(); xp[j] = x[j] + h > ub[j] ? x[j] - h : x[j] + h;
+        const rp = resFn(xp), s = xp[j] - x[j], col = new Float64Array(r.length);
+        for (let i = 0; i < r.length; i++) col[i] = (rp[i] - r[i]) / s;
+        J.push(col);
+      }
+      const JtJ = [], g = new Array(n);
+      for (let a = 0; a < n; a++) {
+        JtJ.push(new Array(n)); let s = 0;
+        for (let i = 0; i < r.length; i++) s += J[a][i] * r[i];
+        g[a] = -s;
+        for (let b = 0; b <= a; b++) { let t = 0; for (let i = 0; i < r.length; i++) t += J[a][i] * J[b][i]; JtJ[a][b] = t; JtJ[b][a] = t; }
+      }
+      let improved = false;
+      for (let tries = 0; tries < 8; tries++) {
+        const A = JtJ.map((row, a) => row.map((v, b) => a === b ? v * (1 + lam) + 1e-9 : v));
+        const d = solve(A, g.slice()), xn = clip(x.map((a, i) => a + d[i])), rn = resFn(xn), cn = rn.reduce((s, a) => s + a * a, 0);
+        if (cn < cost) { const rel = (cost - cn) / Math.max(cost, 1e-12); x = xn; r = rn; cost = cn; lam *= 0.3; improved = rel > 1e-7; break; }
+        lam *= 5;
+      }
+      if (!improved) break;
+    }
+    return x;
+  }
+  function estimateQ(g, err, idx) {
+    const peak = err[idx]; let lo = idx, hi = idx;
+    while (lo > 0 && err[lo - 1] * peak > 0 && Math.abs(err[lo - 1]) > Math.abs(peak) / 2) lo--;
+    while (hi < err.length - 1 && err[hi + 1] * peak > 0 && Math.abs(err[hi + 1]) > Math.abs(peak) / 2) hi++;
+    const bw = Math.max(Math.log2(g[hi] / g[lo]), 0.05), p = Math.pow(2, bw);
+    return Math.min(10, Math.max(0.5, Math.sqrt(p) / (p - 1)));
+  }
+  /* 측정 응답을 목표에 가깝게 만드는 피킹 필터 묶음 찾기 */
+  function design(grid, meas, target, fs, opts = {}) {
+    const o = Object.assign({ fLo: 40, fHi: 16000, maxFilters: 8, maxBoost: 6, maxCut: -12, stopDb: 1, boostWeight: 0.6, maxBoostQ: 5 }, opts);
+    const g = [], base = [];
+    for (let i = 0; i < grid.length; i++) if (grid[i] >= o.fLo && grid[i] <= o.fHi) { g.push(grid[i]); base.push(meas[i] - target[i]); }
+    const unpack = x => { const f = []; for (let i = 0; i < x.length; i += 3) f.push({ fc: Math.exp(x[i]), gain: x[i + 1], q: Math.exp(x[i + 2]) }); return f; };
+    const errOf = fl => { const e = eqDb(g, fs, fl); return base.map((b, i) => b + e[i]); };
+    const res = x => errOf(unpack(x)).map(e => e * (e < 0 ? o.boostWeight : 1));
+    let filters = [];
+    for (let k = 0; k < o.maxFilters; k++) {
+      const err = errOf(filters); let idx = 0, best = 0;
+      for (let i = 0; i < err.length; i++) { const s = Math.abs(err[i]) * (err[i] < 0 ? o.boostWeight : 1); if (s > best) { best = s; idx = i; } }
+      if (best < o.stopDb) break;
+      filters.push({ fc: g[idx], gain: Math.min(o.maxBoost, Math.max(o.maxCut, -err[idx])), q: estimateQ(g, err, idx) });
+      const x0 = [], lb = [], ub = [];
+      for (const p of filters) { x0.push(Math.log(p.fc), p.gain, Math.log(p.q)); lb.push(Math.log(o.fLo), o.maxCut, Math.log(0.5)); ub.push(Math.log(o.fHi), o.maxBoost, Math.log(10)); }
+      filters = unpack(leastSquares(res, x0, lb, ub));
+    }
+    return filters.filter(p => Math.abs(p.gain) >= 0.5 && !(p.gain > 0 && p.q > o.maxBoostQ)).sort((a, b) => a.fc - b.fc);
+  }
+  function preampDb(fs, filters, headroom = 0.5) {
+    if (!filters.length) return 0;
+    const e = eqDb(logGrid(20, 20000, 96), fs, filters); let m = -Infinity; for (const v of e) if (v > m) m = v;
+    return m > 0 ? -(m + headroom) : 0;
+  }
+  function formatConfig(channels, preamp) {
+    const lines = ['# Bangeum Jangin EQ', 'Preamp: ' + preamp.toFixed(1) + ' dB'];
+    for (const ch of Object.keys(channels)) {
+      lines.push('Channel: ' + ch);
+      channels[ch].forEach((p, i) => lines.push('Filter ' + (i + 1) + ': ON PK Fc ' + p.fc.toFixed(1) + ' Hz Gain ' + p.gain.toFixed(1) + ' dB Q ' + p.q.toFixed(2)));
+    }
+    return lines.join('\n') + '\n';
+  }
+  /* 마이크 보정 파일(주파수, dB 두 열) */
+  function parseCalibration(text) {
+    const f = [], d = [];
+    for (const line of text.split(/\r?\n/)) {
+      const p = line.replace(/,/g, ' ').trim().split(/\s+/);
+      if (p.length < 2) continue;
+      const a = Number(p[0]), b = Number(p[1]);
+      if (Number.isFinite(a) && Number.isFinite(b) && a > 0 && p[0] !== '' ) { f.push(a); d.push(b); }
+    }
+    if (f.length < 2) throw new Error('no calibration data');
+    return { f, d };
+  }
+  function applyCalibration(grid, meas, cal) {
+    const out = new Float64Array(grid.length); let j = 0;
+    for (let i = 0; i < grid.length; i++) {
+      const x = grid[i];
+      while (j < cal.f.length - 2 && cal.f[j + 1] < x) j++;
+      let c;
+      if (x <= cal.f[0]) c = cal.d[0];
+      else if (x >= cal.f[cal.f.length - 1]) c = cal.d[cal.d.length - 1];
+      else { const t = Math.log(x / cal.f[j]) / Math.log(cal.f[j + 1] / cal.f[j]); c = cal.d[j] + t * (cal.d[j + 1] - cal.d[j]); }
+      out[i] = meas[i] - c;
+    }
+    return out;
+  }
+  /* 녹음 -> 스무딩된 응답 */
+  function responseFromRecording(rec, sweep, fs, cal) {
+    const ir = impulseResponse(rec, sweep), fr = frequencyResponse(ir, fs), grid = logGrid();
+    let resp = smoothToGrid(fr.df, fr.magDb, grid, 6);
+    if (cal) resp = applyCalibration(grid, resp, cal);
+    return { grid, resp };
+  }
+  /* 체험용 가상의 방 */
+  function simulateRoom(x, fs, modes, seed = 1) {
+    let y = biquad(x, highpassCoeffs(fs, 38));
+    for (const m of modes) y = biquad(y, peakCoeffs(fs, m.fc, m.gain, m.q));
+    const delay = Math.floor(0.02 * fs), rn = Math.floor(0.007 * fs), out = new Float64Array(y.length + delay + rn + fs);
+    let s = seed * 2654435761 >>> 0;
+    const rnd = () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296 - 0.5; };
+    for (let i = 0; i < y.length; i++) { out[i + delay] += y[i]; out[i + delay + rn] += 0.15 * y[i]; }
+    for (let i = 0; i < out.length; i++) out[i] += 0.002 * rnd();
+    return out;
+  }
+  return { logSweep, fft, impulseResponse, frequencyResponse, logGrid, smoothToGrid, peakCoeffs, eqDb, biquad, bandMean,
+    targetCurve, design, preampDb, formatConfig, parseCalibration, applyCalibration, responseFromRecording, simulateRoom };
+})();
+if (typeof module !== 'undefined') module.exports = DSP;
+</script>
+
+<script>
+/* ===== 화면 ===== */
+const TEXT = {
+  ko: {
+    tagline: '방구석 음향 장인',
+    next: '다음', back: '이전', restart: '처음부터 다시',
+    s0_k: '시작', s0_h: '내 방에 맞게 스피커 소리를 보정해요',
+    s0_p: '방의 모양과 가구 때문에 같은 스피커도 방마다 소리가 달라집니다. 마이크로 지금 소리를 측정하고, 고르지 않은 부분을 자동으로 다듬어 드려요. 5분 정도 걸립니다.',
+    s0_need: '준비물: 스피커, 마이크(측정용 마이크가 가장 좋지만 헤드셋이나 웹캠 마이크도 됩니다), 조용한 방.',
+    s0_start: '마이크로 측정 시작', s0_demo: '마이크 없이 체험하기',
+    s0_demo_note: '체험 모드는 가상의 방으로 전체 흐름을 보여 줍니다. 실제 소리는 나지 않아요.',
+    src_q: '어떤 마이크로 측정할까요?', src_pc: '이 컴퓨터의 마이크', src_pc_d: '컴퓨터에 연결된 마이크를 씁니다.',
+    src_phone: '스마트폰', src_phone_d: '앱 설치 없이, 폰 카메라로 QR 코드를 찍어 연결합니다.',
+    ph_scan: '폰 카메라로 QR 코드를 찍고, 폰에 열린 페이지에서 마이크를 허용해 주세요.',
+    ph_wait: '폰 연결을 기다리는 중…', ph_ok: '스마트폰이 연결됐습니다.', ph_lost: '스마트폰 연결이 끊겼습니다. QR 코드를 다시 찍어 주세요.',
+    ph_http: '지금 주소는 보안 연결(HTTPS)이 아니라서 폰에서 열 수 없습니다. 공개된 HTTPS 주소로 이 페이지에 접속해 주세요.',
+    ph_limit: '폰 마이크는 일반 마이크로 취급해 300 Hz 이하만 보정합니다.', ph_err: '폰 연결 서비스를 사용할 수 없습니다 ({e}). 잠시 뒤 다시 시도해 주세요.',
+    s3_p_phone: '폰을 평소 듣는 자리의 귀 높이에 두세요. 폰 아래쪽(마이크가 있는 쪽)이 스피커를 향하게 하고, 손에 들지 말고 받침이나 쿠션 위에 올려 두세요.',
+    s4_phone_fail: '폰에서 녹음을 받지 못했습니다. 폰 화면이 켜져 있는지, 연결됐는지 확인하고 다시 측정해 주세요.',
+    s1_k: '1단계 · 장치', s1_h: '스피커와 마이크를 골라 주세요',
+    s1_perm: '마이크 사용을 허용해 주세요. 소리는 이 브라우저 안에서만 처리되고 어디로도 전송되지 않습니다.',
+    s1_allow: '마이크 허용하기', s1_in: '마이크', s1_out: '스피커 (출력 장치)', s1_out_default: '시스템 기본 출력',
+    s1_mic: '마이크 종류',
+    mic_cal: '측정용 마이크', mic_cal_d: 'UMIK-1처럼 보정 파일이 있는 마이크. 전 음역을 보정합니다.',
+    mic_gen: '일반 마이크', mic_gen_d: '헤드셋, 웹캠, 노트북 마이크. 믿을 수 있는 저음(300 Hz 이하)만 보정합니다.',
+    s1_calfile: '마이크 보정 파일 (선택)', s1_cal_ok: '보정 파일을 읽었습니다: {n}개 지점', s1_cal_bad: '보정 파일을 읽지 못했습니다. 주파수와 dB가 두 열로 적힌 텍스트 파일인지 확인해 주세요.',
+    s1_denied: '마이크를 사용할 수 없습니다. 브라우저 주소창의 권한 설정에서 마이크를 허용한 뒤 다시 눌러 주세요.',
+    s1_proc: '이 마이크는 브라우저의 자동 음질 처리가 꺼지지 않았습니다({list}). 측정이 부정확할 수 있어요.',
+    s2_k: '2단계 · 음량', s2_h: '음량을 맞춰 주세요',
+    s2_p: '시험음을 틀고, 아래 막대가 표시된 구간 안에 들어오도록 스피커 음량을 조절하세요. 평소 음악을 듣는 크기면 충분합니다.',
+    s2_play: '시험음 재생', s2_stop: '시험음 정지',
+    s2_low: '너무 작아요. 스피커 음량을 올려 주세요.', s2_ok: '좋아요. 이 음량으로 측정합니다.', s2_high: '너무 커요. 음량을 낮춰 주세요.',
+    s2_warn: '시험음은 작은 소리로 시작합니다. 음량은 천천히 올리세요.',
+    s3_k: '3단계 · 마이크 위치', s3_h: '평소 듣는 자리에 마이크를 두세요',
+    s3_p: '의자에 앉았을 때 머리가 있는 위치, 귀 높이에 마이크를 둡니다. 측정용 마이크는 천장을 향하게, 일반 마이크는 스피커를 향하게 두세요.',
+    s3_tips: '측정 중에는 움직이거나 말하지 말고, 선풍기나 에어컨은 잠시 꺼 주세요.',
+    s4_k: '4단계 · 측정', s4_h: '측정할게요',
+    s4_p: '왼쪽, 오른쪽 스피커에서 차례로 낮은 음에서 높은 음으로 올라가는 측정음이 나옵니다. 약 15초 걸려요.',
+    s4_go: '측정 시작', s4_L: '왼쪽 스피커 측정 중…', s4_R: '오른쪽 스피커 측정 중…', s4_calc: '계산 중…',
+    s4_clip: '소리가 너무 커서 찌그러졌습니다. 음량을 낮추고 다시 측정해 주세요.',
+    s4_quiet: '마이크에 소리가 거의 들어오지 않았습니다. 음량과 마이크 선택을 확인해 주세요.',
+    s4_noisy: '주변 소음이 커서 결과가 부정확할 수 있습니다. 조용할 때 다시 측정하는 것을 권합니다.',
+    s4_retry: '다시 측정',
+    s5_k: '5단계 · 결과', s5_h: '측정 결과와 보정',
+    s5_left: '왼쪽', s5_right: '오른쪽',
+    lg_before: '보정 전', lg_after: '보정 후(예상)', lg_target: '목표',
+    s5_taste: '소리 취향', taste_flat: '균형 잡힌', taste_flat_d: '모든 음역이 고르게 들립니다.', taste_warm: '따뜻한', taste_warm_d: '저음이 조금 더 풍성하고 고음이 부드럽습니다.',
+    s5_found: '찾은 문제와 보정', s5_none: '크게 손볼 곳이 없습니다. 이미 고른 편이에요.',
+    f_cut: '{f} Hz 근처 {band}이 부풀어 있어 {g} dB 줄입니다.', f_boost: '{f} Hz 근처 {band}이 꺼져 있어 {g} dB 올립니다.',
+    band_sub: '깊은 저음', band_bass: '저음', band_mid: '중음', band_himid: '중고음', band_high: '고음',
+    s5_limit: '일반 마이크라서 300 Hz 이하만 보정했습니다.',
+    s5_roll: '이 스피커는 약 {f} Hz 아래의 저음을 내기 어렵습니다. 그 아래는 억지로 키우지 않았어요.',
+    s6_k: '6단계 · 적용', s6_h: 'PC 전체 소리에 적용하기',
+    s6_helper_ok: '도우미가 연결돼 있습니다. 버튼을 누르면 PC의 모든 소리에 보정이 적용됩니다.',
+    s6_helper_noapo: '도우미는 연결됐지만 Equalizer APO가 설치돼 있지 않습니다. 먼저 설치해 주세요.',
+    s6_helper_no: '도우미가 실행 중이 아닙니다. 설정 파일을 내려받아 직접 넣을 수 있어요.',
+    s6_apply: 'PC에 적용', s6_off: '보정 끄기', s6_on: '보정 켜기', s6_dl: '설정 파일 내려받기',
+    s6_applied: '적용했습니다. 음악을 틀고 켜기/끄기를 눌러 차이를 들어 보세요.', s6_disabled: '보정을 껐습니다.',
+    s6_fail: '적용하지 못했습니다: {e}',
+    s6_manual: '직접 넣는 방법', s6_manual_p: 'Equalizer APO를 설치한 뒤, 내려받은 파일을 설치 폴더의 config 폴더에 넣고 config.txt에 "Include: bangeum_eq.txt" 한 줄을 추가하세요.',
+    s6_limit: '독점 모드나 ASIO로 재생하는 일부 프로그램에는 보정이 적용되지 않습니다.',
+    s6_config: '설정 내용 보기', demo_badge: '체험 모드: 가상의 방 결과입니다.',
+  },
+  en: {
+    tagline: 'Room sound, tuned at home',
+    next: 'Next', back: 'Back', restart: 'Start over',
+    s0_k: 'Start', s0_h: 'Tune your speakers to your room',
+    s0_p: 'Room shape and furniture change how the same speakers sound. We measure the sound with a microphone and smooth out the uneven parts automatically. It takes about 5 minutes.',
+    s0_need: 'You need: speakers, a microphone (a measurement mic is best, a headset or webcam mic also works), and a quiet room.',
+    s0_start: 'Start measuring', s0_demo: 'Try without a microphone',
+    s0_demo_note: 'Demo mode walks through the whole flow with a simulated room. No sound is played.',
+    src_q: 'Which microphone will you use?', src_pc: 'This computer\'s microphone', src_pc_d: 'Use a microphone connected to this computer.',
+    src_phone: 'Smartphone', src_phone_d: 'No app to install. Scan a QR code with the phone camera to connect.',
+    ph_scan: 'Scan the QR code with your phone camera, then allow the microphone on the page that opens.',
+    ph_wait: 'Waiting for the phone…', ph_ok: 'Your phone is connected.', ph_lost: 'The phone disconnected. Scan the QR code again.',
+    ph_http: 'This address is not a secure (HTTPS) connection, so the phone cannot open it. Open this page from its public HTTPS address.',
+    ph_limit: 'A phone mic is treated as a regular mic, so only the range below 300 Hz is corrected.', ph_err: 'The phone connection service is unavailable ({e}). Please try again shortly.',
+    s3_p_phone: 'Put the phone at ear height where you usually listen. Point the bottom of the phone (where the mic is) at the speakers, and rest it on a stand or cushion instead of holding it.',
+    s4_phone_fail: 'No recording arrived from the phone. Check that its screen is on and it is connected, then measure again.',
+    s1_k: 'Step 1 · Devices', s1_h: 'Choose your speakers and microphone',
+    s1_perm: 'Please allow microphone access. Audio is processed only in this browser and is not sent anywhere.',
+    s1_allow: 'Allow microphone', s1_in: 'Microphone', s1_out: 'Speakers (output device)', s1_out_default: 'System default output',
+    s1_mic: 'Microphone type',
+    mic_cal: 'Measurement mic', mic_cal_d: 'A mic with a calibration file, such as a UMIK-1. Corrects the full range.',
+    mic_gen: 'Regular mic', mic_gen_d: 'Headset, webcam or laptop mic. Corrects only the reliable bass range (below 300 Hz).',
+    s1_calfile: 'Mic calibration file (optional)', s1_cal_ok: 'Calibration file loaded: {n} points', s1_cal_bad: 'Could not read the calibration file. It should be a text file with frequency and dB in two columns.',
+    s1_denied: 'The microphone is not available. Allow it in the browser address bar permissions and try again.',
+    s1_proc: 'Browser audio processing could not be turned off for this mic ({list}). The measurement may be inaccurate.',
+    s2_k: 'Step 2 · Volume', s2_h: 'Set the volume',
+    s2_p: 'Play the test sound and adjust the speaker volume until the bar sits inside the marked zone. Your normal listening level is enough.',
+    s2_play: 'Play test sound', s2_stop: 'Stop test sound',
+    s2_low: 'Too quiet. Turn the speakers up.', s2_ok: 'Good. We will measure at this level.', s2_high: 'Too loud. Turn it down.',
+    s2_warn: 'The test sound starts quietly. Raise the volume slowly.',
+    s3_k: 'Step 3 · Mic position', s3_h: 'Put the mic where you usually listen',
+    s3_p: 'Place the mic where your head is when seated, at ear height. Point a measurement mic at the ceiling; point a regular mic at the speakers.',
+    s3_tips: 'Stay still and quiet during the measurement, and switch off fans or air conditioning for a moment.',
+    s4_k: 'Step 4 · Measure', s4_h: 'Ready to measure',
+    s4_p: 'A tone sweeping from low to high plays from the left speaker, then the right. It takes about 15 seconds.',
+    s4_go: 'Start measurement', s4_L: 'Measuring left speaker…', s4_R: 'Measuring right speaker…', s4_calc: 'Calculating…',
+    s4_clip: 'The sound was too loud and distorted. Lower the volume and measure again.',
+    s4_quiet: 'Almost no sound reached the mic. Check the volume and the selected microphone.',
+    s4_noisy: 'Background noise is high, so the result may be inaccurate. Measuring again when it is quiet is recommended.',
+    s4_retry: 'Measure again',
+    s5_k: 'Step 5 · Result', s5_h: 'Measurement and correction',
+    s5_left: 'Left', s5_right: 'Right',
+    lg_before: 'Before', lg_after: 'After (predicted)', lg_target: 'Target',
+    s5_taste: 'Sound preference', taste_flat: 'Balanced', taste_flat_d: 'All ranges sound even.', taste_warm: 'Warm', taste_warm_d: 'Slightly fuller bass and softer treble.',
+    s5_found: 'What we found and corrected', s5_none: 'Nothing major to fix. The response is already fairly even.',
+    f_cut: 'The {band} around {f} Hz is boomy, so it is reduced by {g} dB.', f_boost: 'The {band} around {f} Hz is weak, so it is raised by {g} dB.',
+    band_sub: 'deep bass', band_bass: 'bass', band_mid: 'midrange', band_himid: 'upper midrange', band_high: 'treble',
+    s5_limit: 'With a regular mic, only the range below 300 Hz was corrected.',
+    s5_roll: 'These speakers cannot play much below about {f} Hz. We did not force that range up.',
+    s6_k: 'Step 6 · Apply', s6_h: 'Apply to all sound on this PC',
+    s6_helper_ok: 'The helper is connected. Press the button to apply the correction to all sound on this PC.',
+    s6_helper_noapo: 'The helper is connected, but Equalizer APO is not installed. Please install it first.',
+    s6_helper_no: 'The helper is not running. You can download the settings file and add it yourself.',
+    s6_apply: 'Apply to PC', s6_off: 'Turn correction off', s6_on: 'Turn correction on', s6_dl: 'Download settings file',
+    s6_applied: 'Applied. Play some music and toggle on/off to hear the difference.', s6_disabled: 'Correction is off.',
+    s6_fail: 'Could not apply: {e}',
+    s6_manual: 'How to add it yourself', s6_manual_p: 'Install Equalizer APO, put the downloaded file in the config folder of its install directory, and add the line "Include: bangeum_eq.txt" to config.txt.',
+    s6_limit: 'Programs that play in exclusive mode or through ASIO are not affected.',
+    s6_config: 'Show settings', demo_badge: 'Demo mode: these results come from a simulated room.',
+  }
+};
+
+const S = {
+  lang: (navigator.language || 'ko').toLowerCase().startsWith('ko') ? 'ko' : 'en',
+  step: 0, demo: false, stream: null, ctx: null, devices: { ins: [], outs: [] }, inId: '', outId: '',
+  mic: 'gen', cal: null, calMsg: '', procWarn: '', permError: false,
+  testing: false, level: -90, measuring: '', measureMsg: '', measureWarn: '',
+  source: 'pc', phone: { peer: null, conn: null, code: '', url: '', qr: '', status: '', fs: 0, proc: '', err: '', wait: null },
+  result: null, taste: 'flat', view: 'L', helper: null, applyMsg: '', applyState: '',
+};
+const SWEEP = { f1: 20, f2: 20000, dur: 5 };
+/* 공개 주소(HTTPS). 도우미(127.0.0.1)로 열었을 때 폰 QR에 쓸 주소. 예: 'https://아이디.github.io/bangeum-jangin/' */
+const PUBLIC_BASE = '';
+const HELPER = location.port === '8765' ? '' : 'http://127.0.0.1:8765';
+const $ = id => document.getElementById(id);
+const t = (k, v) => { let s = TEXT[S.lang][k] || k; if (v) for (const key in v) s = s.replace('{' + key + '}', v[key]); return s; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function nav(back, next, nextLabel, nextDisabled) {
+  return '<div class="actions">' +
+    (back === null ? '<span></span>' : '<button class="btn" data-go="' + back + '">' + t('back') + '</button>') +
+    (next === null ? '<span></span>' : '<button class="btn primary" data-go="' + next + '"' + (nextDisabled ? ' disabled' : '') + '>' + (nextLabel || t('next')) + '</button>') + '</div>';
+}
+function choice(name, value, current, title, desc) {
+  return '<label class="choice' + (current === value ? ' on' : '') + '"><input type="radio" name="' + name + '" value="' + value + '"' + (current === value ? ' checked' : '') + '><b>' + title + '</b><span>' + desc + '</span></label>';
+}
+
+const VIEWS = [
+  () => '<p class="kicker">' + t('s0_k') + '</p><h1>' + t('s0_h') + '</h1><p>' + t('s0_p') + '</p><p class="lead">' + t('s0_need') + '</p>' +
+    '<div class="actions"><button class="btn" id="demo">' + t('s0_demo') + '</button><button class="btn primary" id="start">' + t('s0_start') + '</button></div>' +
+    '<p class="note" style="margin-top:16px">' + t('s0_demo_note') + '</p>',
+
+  () => {
+    let h = '<p class="kicker">' + t('s1_k') + '</p><h1>' + t('s1_h') + '</h1>';
+    h += '<p style="margin:0 0 6px;font-size:14px;color:var(--muted)">' + t('src_q') + '</p><div class="choices">' +
+      choice('source', 'pc', S.source, t('src_pc'), t('src_pc_d')) + choice('source', 'phone', S.source, t('src_phone'), t('src_phone_d')) + '</div>';
+    if (S.source === 'phone') return h + phoneView() + nav(0, 2, null, S.phone.status !== 'ok');
+    if (!S.stream) {
+      h += '<p>' + t('s1_perm') + '</p>' + (S.permError ? '<p class="note bad">' + t('s1_denied') + '</p>' : '') +
+        '<button class="btn primary" id="allow">' + t('s1_allow') + '</button>' + nav(0, null);
+      return h;
+    }
+    const opt = (d, cur) => '<option value="' + esc(d.deviceId) + '"' + (d.deviceId === cur ? ' selected' : '') + '>' + esc(d.label || d.deviceId.slice(0, 8)) + '</option>';
+    h += '<label class="field">' + t('s1_in') + '<select id="inSel">' + S.devices.ins.map(d => opt(d, S.inId)).join('') + '</select></label>';
+    if (S.devices.outs.length && S.ctx && S.ctx.setSinkId)
+      h += '<label class="field">' + t('s1_out') + '<select id="outSel"><option value="">' + t('s1_out_default') + '</option>' + S.devices.outs.filter(d => d.deviceId !== 'default').map(d => opt(d, S.outId)).join('') + '</select></label>';
+    if (S.procWarn) h += '<p class="note warn">' + t('s1_proc', { list: esc(S.procWarn) }) + '</p>';
+    h += '<p style="margin:0 0 6px;font-size:14px;color:var(--muted)">' + t('s1_mic') + '</p><div class="choices">' +
+      choice('mic', 'cal', S.mic, t('mic_cal'), t('mic_cal_d')) + choice('mic', 'gen', S.mic, t('mic_gen'), t('mic_gen_d')) + '</div>';
+    if (S.mic === 'cal') h += '<label class="field">' + t('s1_calfile') + '<input type="file" id="calFile" accept=".txt,.cal,.csv,.frd"></label>' + (S.calMsg ? '<p class="note ' + (S.cal ? 'good' : 'bad') + '">' + S.calMsg + '</p>' : '');
+    return h + nav(0, 2);
+  },
+
+  () => '<p class="kicker">' + t('s2_k') + '</p><h1>' + t('s2_h') + '</h1><p>' + t('s2_p') + '</p><p class="note warn">' + t('s2_warn') + '</p>' +
+    '<button class="btn" id="test">' + t(S.testing ? 's2_stop' : 's2_play') + '</button>' +
+    '<div class="meter" style="margin-top:16px"><i id="bar"></i><span class="zone"></span></div><p class="meterlabel" id="barLabel">&nbsp;</p>' + nav(1, 3),
+
+  () => '<p class="kicker">' + t('s3_k') + '</p><h1>' + t('s3_h') + '</h1>' +
+    '<svg class="pic" viewBox="0 0 520 220" role="img" aria-label="' + t('s3_h') + '"><g fill="none" stroke="currentColor" stroke-width="2">' +
+    '<rect x="10" y="10" width="500" height="200" rx="10" opacity=".35"/><rect x="90" y="28" width="46" height="70" rx="6"/><circle cx="113" cy="50" r="8"/><circle cx="113" cy="76" r="12"/>' +
+    '<rect x="384" y="28" width="46" height="70" rx="6"/><circle cx="407" cy="50" r="8"/><circle cx="407" cy="76" r="12"/>' +
+    '<path d="M113 104 L255 168 M407 104 L265 168" stroke-dasharray="5 6" opacity=".5"/></g>' +
+    '<circle cx="260" cy="172" r="11" fill="var(--accent)"/><path d="M260 183v18" stroke="var(--accent)" stroke-width="3"/></svg>' +
+    '<p>' + t(S.source === 'phone' ? 's3_p_phone' : 's3_p') + '</p><p class="note">' + t('s3_tips') + '</p>' + nav(2, 4),
+
+  () => {
+    let h = '<p class="kicker">' + t('s4_k') + '</p><h1>' + t('s4_h') + '</h1><p>' + t('s4_p') + '</p>';
+    if (S.measuring) h += '<p class="progress">' + t('s4_' + S.measuring) + '</p><div class="meter"><i id="bar"></i></div>';
+    else {
+      if (S.measureMsg) h += '<p class="note bad">' + t(S.measureMsg) + '</p>';
+      h += '<button class="btn primary" id="measure">' + t(S.measureMsg ? 's4_retry' : 's4_go') + '</button>';
+    }
+    return h + (S.measuring ? '' : nav(S.demo ? 0 : 3, null));
+  },
+
+  () => {
+    const r = S.result, ch = r[S.view];
+    let h = '<p class="kicker">' + t('s5_k') + '</p><h1>' + t('s5_h') + '</h1>';
+    if (S.demo) h += '<p class="note">' + t('demo_badge') + '</p>';
+    if (S.measureWarn) h += '<p class="note warn">' + t(S.measureWarn) + '</p>';
+    h += '<div class="tabs" role="group"><button type="button" data-view="L" aria-pressed="' + (S.view === 'L') + '">' + t('s5_left') + '</button><button type="button" data-view="R" aria-pressed="' + (S.view === 'R') + '">' + t('s5_right') + '</button></div>';
+    h += '<canvas id="plot" role="img" aria-label="' + t('s5_h') + '"></canvas><div class="legend"><span><i style="background:var(--before)"></i>' + t('lg_before') + '</span><span><i style="background:var(--accent)"></i>' + t('lg_after') + '</span><span><i style="background:var(--ink);height:1px"></i>' + t('lg_target') + '</span></div>';
+    h += '<p style="margin:0 0 6px;font-size:14px;color:var(--muted)">' + t('s5_taste') + '</p><div class="choices">' +
+      choice('taste', 'flat', S.taste, t('taste_flat'), t('taste_flat_d')) + choice('taste', 'warm', S.taste, t('taste_warm'), t('taste_warm_d')) + '</div>';
+    h += '<p style="margin:0 0 6px;font-weight:600">' + t('s5_found') + '</p>';
+    if (!ch.filters.length) h += '<p>' + t('s5_none') + '</p>';
+    else h += '<ul class="find">' + ch.filters.map(p => '<li>' + t(p.gain < 0 ? 'f_cut' : 'f_boost', { f: Math.round(p.fc), band: t(bandName(p.fc)), g: Math.abs(p.gain).toFixed(1) }) + '</li>').join('') + '</ul>';
+    if (ch.rolloff > 45) h += '<p class="note">' + t('s5_roll', { f: Math.round(ch.rolloff) }) + '</p>';
+    if (limited()) h += '<p class="note">' + t(S.source === 'phone' ? 'ph_limit' : 's5_limit') + '</p>';
+    return h + nav(4, 6);
+  },
+
+  () => {
+    let h = '<p class="kicker">' + t('s6_k') + '</p><h1>' + t('s6_h') + '</h1>';
+    const hp = S.helper;
+    if (hp && hp.apo_installed) h += '<p class="note good">' + t('s6_helper_ok') + '</p>';
+    else if (hp) h += '<p class="note warn">' + t('s6_helper_noapo') + '</p>';
+    else h += '<p class="note">' + t('s6_helper_no') + '</p>';
+    h += '<div class="row">';
+    if (hp && hp.apo_installed) h += '<button class="btn primary" id="apply">' + t('s6_apply') + '</button><button class="btn" id="toggle">' + t(S.applyState === 'off' ? 's6_on' : 's6_off') + '</button>';
+    h += '<button class="btn' + (hp && hp.apo_installed ? '' : ' primary') + '" id="download">' + t('s6_dl') + '</button></div>';
+    if (S.applyMsg) h += '<p class="note ' + (S.applyState === 'error' ? 'bad' : 'good') + '" style="margin-top:14px">' + esc(S.applyMsg) + '</p>';
+    h += '<details style="margin-top:18px"><summary>' + t('s6_manual') + '</summary><p style="margin-top:8px">' + t('s6_manual_p') + '</p></details>';
+    h += '<details><summary>' + t('s6_config') + '</summary><pre>' + esc(S.result.config) + '</pre></details><p class="note">' + t('s6_limit') + '</p>';
+    return h + '<div class="actions"><button class="btn" data-go="5">' + t('back') + '</button><button class="btn" data-go="0">' + t('restart') + '</button></div>';
+  },
+];
+
+function limited() { return !S.demo && (S.source === 'phone' || S.mic === 'gen'); }
+function phoneView() {
+  const P = S.phone;
+  if (P.err) return '<p class="note bad">' + t('ph_err', { e: esc(P.err) }) + '</p>';
+  if (P.status === 'ok') return '<p class="note good">' + t('ph_ok') + '</p>' + (P.proc ? '<p class="note warn">' + t('s1_proc', { list: esc(P.proc) }) + '</p>' : '') + '<p class="note">' + t('ph_limit') + '</p>';
+  if (!P.url) return '<p class="progress">' + t('ph_wait') + '</p>';
+  return (/^https:/.test(P.url) ? '' : '<p class="note bad">' + t('ph_http') + '</p>') +
+    '<div class="qr">' + P.qr + '</div><p>' + t('ph_scan') + '</p><p class="meterlabel"><a id="phoneLink" href="' + esc(P.url) + '">' + esc(P.url) + '</a></p>' +
+    (P.status === 'lost' ? '<p class="note bad">' + t('ph_lost') + '</p>' : '') + '<p class="progress">' + t('ph_wait') + '</p>';
+}
+function bandName(f) { return f < 80 ? 'band_sub' : f < 300 ? 'band_bass' : f < 2000 ? 'band_mid' : f < 6000 ? 'band_himid' : 'band_high'; }
+
+function render() {
+  document.documentElement.lang = S.lang;
+  $('tagline').textContent = t('tagline');
+  document.querySelectorAll('.lang button').forEach(b => b.setAttribute('aria-pressed', b.dataset.lang === S.lang));
+  $('steps').innerHTML = VIEWS.map((_, i) => '<li class="' + (i <= S.step ? 'done' : '') + '"></li>').join('');
+  $('view').innerHTML = VIEWS[S.step]();
+  if (S.step === 5) drawPlot();
+}
+function go(step) {
+  if (S.testing) stopTest();
+  if (step === 0) { S.demo = false; S.measureMsg = ''; }
+  S.step = step; S.applyMsg = S.step === 6 ? S.applyMsg : '';
+  render();
+  if (step === 6) checkHelper();
+  const h = document.querySelector('#view h1'); if (h) { h.tabIndex = -1; h.focus({ preventScroll: true }); }
+  window.scrollTo({ top: 0 });
+}
+
+/* ----- 오디오 ----- */
+async function openMic(deviceId) {
+  if (S.stream) S.stream.getTracks().forEach(tr => tr.stop());
+  const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 };
+  if (deviceId) audio.deviceId = { exact: deviceId };
+  S.stream = await navigator.mediaDevices.getUserMedia({ audio });
+  const track = S.stream.getAudioTracks()[0], st = track.getSettings ? track.getSettings() : {};
+  S.inId = st.deviceId || deviceId || '';
+  S.procWarn = ['echoCancellation', 'noiseSuppression', 'autoGainControl'].filter(k => st[k] === true).join(', ');
+  await ensureCtx();
+  const list = await navigator.mediaDevices.enumerateDevices();
+  S.devices.ins = list.filter(d => d.kind === 'audioinput');
+  S.devices.outs = list.filter(d => d.kind === 'audiooutput');
+}
+async function ensureCtx() {
+  if (!S.ctx) S.ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
+  if (S.ctx.state === 'suspended') await S.ctx.resume();
+}
+/* ----- 스마트폰 연결 (WebRTC 데이터 채널, PeerJS) ----- */
+function peerOptions() {
+  const p = new URLSearchParams(location.search).get('peer'); if (!p) return {};
+  const [host, port] = p.split(':'); return { host, port: Number(port), path: '/', secure: false };
+}
+function startPhone() {
+  const P = S.phone; if (P.peer) return;
+  if (typeof Peer === 'undefined' || typeof qrcode === 'undefined') { P.err = 'library'; return; }
+  P.err = ''; P.code = Array.from(crypto.getRandomValues(new Uint8Array(8)), b => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join('');
+  const base = PUBLIC_BASE || location.href.replace(/[?#].*$/, '').replace(/[^/]*$/, '');
+  const q = new URLSearchParams({ c: P.code, lang: S.lang }), test = new URLSearchParams(location.search).get('peer'); if (test) q.set('peer', test);
+  P.peer = new Peer('bangeumjangin-' + P.code, peerOptions());
+  P.peer.on('open', () => {
+    P.url = base + 'phone.html?' + q; const qr = qrcode(0, 'M'); qr.addData(P.url); qr.make();
+    P.qr = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true }); if (S.step === 1) render();
+  });
+  P.peer.on('connection', conn => {
+    if (P.conn) P.conn.close(); P.conn = conn;
+    conn.on('data', onPhoneData);
+    conn.on('close', () => { if (P.conn === conn) { P.conn = null; P.status = 'lost'; if (S.step === 1) render(); } });
+  });
+  P.peer.on('error', e => { if (!P.url) { P.err = e.type || String(e); P.peer = null; if (S.step === 1) render(); } });
+}
+function onPhoneData(m) {
+  const P = S.phone; if (!m || typeof m !== 'object') return;
+  if (m.t === 'hello') { P.fs = Number(m.fs) || 48000; P.proc = String(m.proc || ''); P.status = 'ok'; if (S.step === 1) render(); }
+  else if (m.t === 'level') { S.level = Number(m.db); showLevel(); }
+  else if (P.wait && P.wait.type === m.t) { const w = P.wait; P.wait = null; clearTimeout(w.timer); w.resolve(m); }
+}
+function waitPhone(type, ms) {
+  return new Promise((resolve, reject) => { const P = S.phone; P.wait = { type, resolve, timer: setTimeout(() => { P.wait = null; reject(new Error('timeout')); }, ms) }; });
+}
+/* 입력을 계속 받아 두는 탭: onChunk(Float32Array) */
+function tapInput(onChunk) {
+  const src = S.ctx.createMediaStreamSource(S.stream), proc = S.ctx.createScriptProcessor(4096, 1, 1), mute = S.ctx.createGain();
+  mute.gain.value = 0;
+  proc.onaudioprocess = e => onChunk(new Float32Array(e.inputBuffer.getChannelData(0)));
+  src.connect(proc); proc.connect(mute); mute.connect(S.ctx.destination);
+  return () => { proc.onaudioprocess = null; src.disconnect(); proc.disconnect(); mute.disconnect(); };
+}
+let testNodes = null;
+function startTest() {
+  const fs = S.ctx.sampleRate, n = fs * 2, buf = S.ctx.createBuffer(2, n, fs), d = buf.getChannelData(0);
+  let b0 = 0, b1 = 0, b2 = 0;                 /* 핑크 잡음에 가까운 시험음 */
+  for (let i = 0; i < n; i++) { const w = Math.random() * 2 - 1; b0 = 0.99765 * b0 + w * 0.099046; b1 = 0.963 * b1 + w * 0.2965164; b2 = 0.57 * b2 + w * 1.0526913; d[i] = (b0 + b1 + b2 + w * 0.1848) * 0.05; }
+  buf.copyToChannel(d, 1);
+  const src = S.ctx.createBufferSource(), gain = S.ctx.createGain();
+  src.buffer = buf; src.loop = true; gain.gain.setValueAtTime(0.0001, S.ctx.currentTime); gain.gain.exponentialRampToValueAtTime(1, S.ctx.currentTime + 1.5);
+  src.connect(gain); gain.connect(S.ctx.destination); src.start();
+  let untap;
+  if (S.source === 'phone') { const c = S.phone.conn; if (c) c.send({ t: 'level', on: true }); untap = () => { if (S.phone.conn) S.phone.conn.send({ t: 'level', on: false }); }; }
+  else untap = tapInput(chunk => {
+    let s = 0; for (let i = 0; i < chunk.length; i++) s += chunk[i] * chunk[i];
+    const db = 10 * Math.log10(s / chunk.length + 1e-12); S.level = S.level * 0.6 + db * 0.4; showLevel();
+  });
+  testNodes = { src, untap }; S.testing = true;
+}
+function stopTest() { if (testNodes) { try { testNodes.src.stop(); } catch (e) {} testNodes.untap(); testNodes = null; } S.testing = false; }
+function showLevel() {
+  const bar = $('bar'), label = $('barLabel'); if (!bar || !label) return;
+  const db = S.level, pct = Math.min(100, Math.max(0, (db + 70) / 70 * 100));   /* -70..0 dBFS, 표시 구간 -35..-7 */
+  bar.style.width = pct + '%';
+  const state = db < -35 ? 'low' : db > -7 ? 'high' : 'ok';
+  bar.style.background = state === 'ok' ? 'var(--good)' : state === 'low' ? 'var(--warn)' : 'var(--bad)';
+  label.textContent = db.toFixed(0) + ' dBFS · ' + t('s2_' + state);
+}
+/* 한쪽 채널로 스윕을 재생하고, 끝난 뒤(여유 포함) 완료된다 */
+function playSweep(sweep, channel, lead = 0.4, tail = 1.2) {
+  return new Promise(resolve => {
+    const buf = S.ctx.createBuffer(2, sweep.length, S.ctx.sampleRate);
+    buf.copyToChannel(Float32Array.from(sweep), channel);
+    const src = S.ctx.createBufferSource(); src.buffer = buf; src.connect(S.ctx.destination);
+    src.start(S.ctx.currentTime + lead);
+    const total = (lead + SWEEP.dur + tail) * 1000, t0 = performance.now();
+    const tick = setInterval(() => { const bar = $('bar'); if (bar) bar.style.width = Math.min(100, (performance.now() - t0) / total * 100) + '%'; }, 100);
+    setTimeout(() => { clearInterval(tick); resolve(); }, total);
+  });
+}
+async function captureLocal(sweep, channel) {
+  const chunks = [], untap = tapInput(c => chunks.push(c));
+  await playSweep(sweep, channel); untap();
+  let n = 0; for (const c of chunks) n += c.length;
+  const rec = new Float64Array(n); let o = 0; for (const c of chunks) { rec.set(c, o); o += c.length; }
+  return rec;
+}
+/* 폰에 녹음을 시키고, PC에서 스윕을 재생한 뒤, 폰이 보낸 녹음을 받는다 */
+async function capturePhone(sweep, channel) {
+  const c = S.phone.conn; if (!c) throw new Error('no phone');
+  c.send({ t: 'rec', on: true }); await waitPhone('recStart', 4000);
+  await playSweep(sweep, channel);
+  c.send({ t: 'rec', on: false }); const m = await waitPhone('audio', 20000);
+  const raw = m.pcm, i16 = raw instanceof ArrayBuffer ? new Int16Array(raw) : new Int16Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
+  const rec = new Float64Array(i16.length); for (let i = 0; i < i16.length; i++) rec[i] = i16[i] / 32767;
+  window.__lastRec = { n: rec.length, fs: m.fs };
+  return rec;
+}
+function checkRecording(rec, fs) {
+  let peak = 0, noise = 0, sig = 0; const nLead = Math.floor(0.25 * fs);
+  for (let i = 0; i < rec.length; i++) { const a = Math.abs(rec[i]); if (a > peak) peak = a; if (i < nLead) noise += rec[i] * rec[i]; else sig += rec[i] * rec[i]; }
+  if (peak > 0.98) return { error: 's4_clip' };
+  if (peak < 0.003) return { error: 's4_quiet' };
+  const snr = 10 * Math.log10((sig / (rec.length - nLead) + 1e-15) / (noise / nLead + 1e-15));
+  return { warn: snr < 15 ? 's4_noisy' : '' };
+}
+const DEMO_ROOMS = {
+  L: [{ fc: 55, gain: 9, q: 6 }, { fc: 110, gain: -5, q: 4 }, { fc: 180, gain: 6, q: 5 }, { fc: 2500, gain: 4, q: 1.5 }],
+  R: [{ fc: 48, gain: 7, q: 5 }, { fc: 95, gain: 5, q: 6 }, { fc: 240, gain: -4, q: 3 }, { fc: 3200, gain: 3, q: 2 }],
+};
+const pause = ms => new Promise(r => setTimeout(r, ms));
+async function measure() {
+  S.measureMsg = ''; S.measureWarn = '';
+  const phone = !S.demo && S.source === 'phone';
+  const fsOut = S.demo ? 48000 : S.ctx.sampleRate, fs = phone ? S.phone.fs : fsOut;   /* fs: 녹음 쪽 샘플레이트 */
+  const f2 = Math.min(SWEEP.f2, 0.92 * Math.min(fs, fsOut) / 2);
+  const sweepOut = DSP.logSweep(SWEEP.f1, f2, SWEEP.dur, fsOut), sweep = fs === fsOut ? sweepOut : DSP.logSweep(SWEEP.f1, f2, SWEEP.dur, fs), raw = {};
+  for (const [i, ch] of ['L', 'R'].entries()) {
+    S.measuring = ch; render();
+    let rec;
+    if (S.demo) { await pause(500); rec = DSP.simulateRoom(sweep, fs, DEMO_ROOMS[ch], i + 3); }
+    else {
+      try { rec = phone ? await capturePhone(sweepOut, i) : await captureLocal(sweepOut, i); }
+      catch (err) { S.measuring = ''; S.measureMsg = 's4_phone_fail'; render(); return; }
+      const chk = checkRecording(rec, fs);
+      if (chk.error) { S.measuring = ''; S.measureMsg = chk.error; render(); return; }
+      if (chk.warn) S.measureWarn = chk.warn;
+    }
+    S.measuring = 'calc'; render(); await pause(30);
+    raw[ch] = DSP.responseFromRecording(rec, sweep, fs, !S.demo && !phone && S.mic === 'cal' ? S.cal : null);
+  }
+  S.result = { fs, raw }; S.measuring = '';
+  computeCorrection(); go(5);
+}
+function computeCorrection() {
+  const r = S.result, tilt = S.taste === 'warm' ? -0.4 : 0, fHi = limited() ? 300 : 16000, chans = {};
+  for (const ch of ['L', 'R']) {
+    const { grid, resp } = r.raw[ch], tc = DSP.targetCurve(grid, resp, tilt);
+    const filters = DSP.design(grid, resp, tc.target, r.fs, { fHi });
+    r[ch] = { grid, resp, target: tc.target, level: tc.level, rolloff: tc.rolloff, filters, after: DSP.eqDb(grid, r.fs, filters).map((e, i) => e + resp[i]) };
+    chans[ch] = filters;
+  }
+  r.preamp = Math.min(DSP.preampDb(r.fs, chans.L), DSP.preampDb(r.fs, chans.R));
+  r.config = DSP.formatConfig(chans, r.preamp);
+}
+
+/* ----- 그래프 ----- */
+function drawPlot() {
+  const cv = $('plot'); if (!cv) return;
+  const ch = S.result[S.view], dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const L = 44, R = 12, T = 12, B = 30, lo = 20, hi = 20000, yMin = -18, yMax = 18;
+  const X = f => L + Math.log(f / lo) / Math.log(hi / lo) * (W - L - R), Y = d => T + (yMax - d) / (yMax - yMin) * (H - T - B);
+  g.font = '12px system-ui, sans-serif'; g.lineWidth = 1; g.strokeStyle = css('--line'); g.fillStyle = css('--muted');
+  g.textAlign = 'center';
+  for (const f of [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]) {
+    g.beginPath(); g.moveTo(X(f), T); g.lineTo(X(f), H - B); g.stroke();
+    g.fillText(f >= 1000 ? f / 1000 + 'k' : String(f), X(f), H - B + 16);
+  }
+  g.textAlign = 'right';
+  for (let d = -12; d <= 12; d += 6) { g.beginPath(); g.moveTo(L, Y(d)); g.lineTo(W - R, Y(d)); g.stroke(); g.fillText((d > 0 ? '+' : '') + d, L - 6, Y(d) + 4); }
+  g.textAlign = 'left'; g.fillText('Hz', W - R - 16, H - 4); g.fillText('dB', 6, T + 10);
+  const line = (data, color, width, dash) => {
+    g.save(); g.beginPath(); g.rect(L, T, W - L - R, H - T - B); g.clip();
+    g.strokeStyle = color; g.lineWidth = width; g.setLineDash(dash || []); g.lineJoin = 'round'; g.beginPath();
+    for (let i = 0; i < ch.grid.length; i++) { const x = X(ch.grid[i]), y = Y(data[i] - ch.level); i ? g.lineTo(x, y) : g.moveTo(x, y); }
+    g.stroke(); g.restore();
+  };
+  line(ch.target, css('--ink'), 1, [5, 4]); line(ch.resp, css('--before'), 2); line(ch.after, css('--accent'), 2.5);
+}
+
+/* ----- 도우미 ----- */
+async function helperCall(path, body) {
+  const res = await fetch(HELPER + path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  const data = await res.json(); if (!res.ok) throw new Error(data.error || res.status); return data;
+}
+async function checkHelper() {
+  try { S.helper = await helperCall('/api/status'); } catch (e) { S.helper = null; }
+  if (S.step === 6) render();
+}
+async function applyConfig(enabled) {
+  try {
+    await helperCall('/api/apply', { config: S.result.config, enabled });
+    S.applyState = enabled ? 'on' : 'off'; S.applyMsg = t(enabled ? 's6_applied' : 's6_disabled');
+  } catch (e) { S.applyState = 'error'; S.applyMsg = t('s6_fail', { e: e.message }); }
+  render();
+}
+function download() {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([S.result.config], { type: 'text/plain' })); a.download = 'bangeum_eq.txt';
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/* ----- 이벤트 ----- */
+document.querySelector('.lang').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { S.lang = b.dataset.lang; if (S.applyMsg) S.applyMsg = ''; render(); } });
+$('view').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.go !== undefined) return go(Number(b.dataset.go));
+  if (b.dataset.view) { S.view = b.dataset.view; return render(); }
+  switch (b.id) {
+    case 'start': S.demo = false; if (S.source === 'phone') startPhone(); return go(1);
+    case 'demo': S.demo = true; go(4); return measure();
+    case 'allow': try { await openMic(); S.permError = false; } catch (err) { S.permError = true; } return render();
+    case 'test': S.testing ? stopTest() : startTest(); return render();
+    case 'measure': return measure();
+    case 'apply': return applyConfig(true);
+    case 'toggle': return applyConfig(S.applyState === 'off');
+    case 'download': return download();
+  }
+});
+$('view').addEventListener('change', async e => {
+  const el = e.target;
+  if (el.id === 'inSel') { try { await openMic(el.value); } catch (err) { S.permError = true; S.stream = null; } render(); }
+  else if (el.id === 'outSel') { S.outId = el.value; try { await S.ctx.setSinkId(el.value); } catch (err) {} }
+  else if (el.name === 'mic') { S.mic = el.value; render(); }
+  else if (el.name === 'source') { S.source = el.value; if (S.source === 'phone') { try { await ensureCtx(); } catch (err) {} startPhone(); } render(); }
+  else if (el.name === 'taste') { S.taste = el.value; computeCorrection(); render(); }
+  else if (el.id === 'calFile' && el.files[0]) {
+    try { S.cal = DSP.parseCalibration(await el.files[0].text()); S.calMsg = t('s1_cal_ok', { n: S.cal.f.length }); }
+    catch (err) { S.cal = null; S.calMsg = t('s1_cal_bad'); }
+    render();
+  }
+});
+window.addEventListener('resize', () => { if (S.step === 5) drawPlot(); });
+render();
+</script>
+</body>
+</html>
