@@ -27,10 +27,12 @@ NUM = r"-?\d{1,5}(\.\d{1,3})?"
 ALLOWED = [
     re.compile(r"^#[^\r\n]{0,200}$"),
     re.compile(r"^Preamp: %s dB$" % NUM),
-    re.compile(r"^Channel: (L|R|C|LFE|RL|RR|SL|SR|ALL)$"),
+    re.compile(r"^Channel: (L|R|C|LFE|RL|RR|SL|SR|ALL|XOVERL|XOVERR|XOVERL XOVERR)$"),
     re.compile(r"^Filter \d{1,2}: ON PK Fc %s Hz Gain %s dB Q %s$" % (NUM, NUM, NUM)),
-    re.compile(r"^Filter \d{1,2}: ON (LP|HP) Fc %s Hz$" % NUM),
-    re.compile(r"^Copy: LFE=\d\.\d{3}\*L\+\d\.\d{3}\*R\+LFE$"),
+    re.compile(r"^Filter \d{1,2}: ON (LPQ|HPQ) Fc %s Hz Q %s$" % (NUM, NUM)),
+    re.compile(r"^Delay: \d{1,3}(\.\d{1,2})? ms$"),
+    re.compile(r"^Copy: LFE=\d\.\d{3}\*L\+\d\.\d{3}\*R(\+LFE)? XOVERL=L XOVERR=R$"),
+    re.compile(r"^Copy: L=XOVERL R=XOVERR$"),
 ]
 MAX_LINES = 80
 STATIC = {
